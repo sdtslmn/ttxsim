@@ -1,0 +1,348 @@
+id: lost-laptop
+title: Left on the train
+level: beginner
+minutes: 15
+sector: Healthcare
+org: Alder Valley Medical Group (fictional)
+role: You are the information security officer.
+summary: The HR manager left his laptop on a train. Was the data protected, who needs to know, and by when?
+start: Wed 08:40
+limit: 8h
+pass: 70
+
+briefing: |
+  Alder Valley Medical Group runs six clinics and employs about 260 people.
+  You are the information security officer, a team of one with help from IT.
+
+  Company policy says the privacy officer must hear about any possible loss of
+  personal data **within four hours**. The privacy officer decides whether the
+  regulator and the people affected must be told.
+
+  Laptops are managed through a device management (MDM) tool that can lock or
+  wipe a device the next time it connects to the internet.
+
+meters:
+  exposure:
+    label: Data exposure risk
+    start: 50
+    good: low
+  trust:
+    label: Staff trust
+    start: 80
+    good: high
+  compliance:
+    label: Regulatory standing
+    start: 80
+    good: high
+
+injects:
+  - id: daniel_call
+    at: 0
+    from: Daniel Okafor, HR Manager
+    via: call
+    subject: My laptop is gone
+    body: |
+      "I'm so sorry. I left my work laptop on the train last night, on the
+      22:40 home. I only noticed this morning. I've called the rail company's
+      lost property line but they haven't called back. What do I do?"
+
+  - id: daniel_chat
+    at: 30
+    from: Daniel Okafor, HR Manager
+    via: chat
+    subject: One more thing
+    body: |
+      Just remembered: my browser stays signed in to the HR system and the
+      payroll portal. I never sign out. Does that matter?
+
+  - id: lost_property
+    at: 90
+    from: Rail company lost property
+    via: email
+    subject: "Your enquiry: laptop, 22:40 service"
+    body: |
+      Thank you for your enquiry. No laptop matching your description has been
+      handed in at any station on the route. We will contact you if it is.
+
+  - id: device_wiped
+    at: 150
+    when: wipe_queued and time <= 150
+    from: MDM console
+    via: alert
+    subject: "Device LT-HR-07 checked in: wipe completed"
+    body: |
+      LT-HR-07 connected from a home broadband address at 11:10 and received
+      the queued **lock and wipe** command. The wipe completed and the device is
+      now unusable.
+    effects:
+      set: [wiped]
+      exposure: -30
+
+  - id: device_seen
+    at: 150
+    when: not wipe_queued
+    from: MDM console
+    via: alert
+    subject: "Device LT-HR-07 checked in"
+    body: |
+      LT-HR-07 connected from a home broadband address at 11:10 and stayed
+      online for six minutes. Recently opened files reported by the agent:
+      **payroll_export_2026.xlsx**, **new_starters_ID_scans.pdf**. No
+      commands were queued for this device.
+    effects:
+      set: [data_viewed]
+      exposure: 30
+
+  - id: compliance_angry
+    at: 240
+    when: not privacy_told
+    from: Farah Iqbal, Privacy Officer
+    via: email
+    subject: Why am I hearing this from the canteen?
+    body: |
+      I've just heard that a laptop with HR data was lost last night. Nobody
+      told me. Our policy says four hours, and the clock for the regulator may
+      already be running. Please come and see me now.
+    effects:
+      compliance: -20
+
+actions:
+  - id: ask_daniel
+    group: investigate
+    label: Ask Daniel what was on the laptop and how it was protected
+    takes: 15
+    result: |
+      Daniel thinks it had the payroll export he was working on and some scans
+      of new starters' passports in Downloads. The laptop was asleep, not shut
+      down. His password is "his dog's name plus the year", he admits.
+    effects:
+      set: [rough_list]
+
+  - id: check_mdm
+    group: investigate
+    label: Look up the laptop in the device management console
+    takes: 10
+    result: |
+      LT-HR-07 last checked in at 23:05 last night from the train's Wi-Fi.
+      **Disk encryption: not enabled.** It sits on an old exception list of six
+      laptops that run a legacy payroll plugin. Remote lock and wipe are
+      available and will run at the next check-in.
+    effects:
+      set: [encryption_known]
+
+  - id: queue_wipe
+    group: contain
+    when: did.check_mdm
+    label: Queue a remote lock and wipe for the laptop
+    takes: 5
+    result: The command is queued. It runs the moment the laptop connects to the internet.
+    effects:
+      set: [wipe_queued]
+      exposure: -5
+
+  - id: revoke_daniel
+    group: contain
+    label: Reset Daniel's password and sign him out of every system, including HR and payroll
+    takes: 10
+    result: Daniel's password is reset and every session is revoked, so the saved browser sessions on the laptop no longer work.
+    effects:
+      set: [sessions_revoked]
+      exposure: -15
+
+  - id: review_sync
+    group: investigate
+    label: Check file sync and server logs to list exactly which files were on the laptop
+    takes: 30
+    result: |
+      The sync logs give you a precise list: the payroll export (262 staff,
+      with bank details and salaries), 14 passport scans and three disciplinary
+      letters. No patient data.
+    effects:
+      set: [data_known]
+
+  - id: tell_privacy
+    group: coordinate
+    label: Tell the privacy officer
+    takes: 10
+    result: |
+      Farah thanks you for coming early. She asks you to get an exact list of
+      the files before you both decide whether to notify anyone.
+    effects:
+      set: [privacy_told]
+      compliance: 10
+
+  - id: report_loss
+    group: coordinate
+    label: Report the loss to the police and log it with the rail company
+    takes: 10
+    result: You get a police reference number. The regulator and the insurer will both ask for it.
+    effects:
+      set: [police_report]
+
+  - id: assess_notify
+    group: coordinate
+    when: privacy_told and data_known
+    label: Work through the breach assessment with the privacy officer
+    takes: 30
+    result:
+      - when: wiped
+        text: |
+          The laptop is wiped now, but it was online last night and this morning
+          before you could act. Unencrypted bank details and passport scans are a
+          high risk to staff. Farah decides to notify the regulator and the 262
+          staff.
+      - text: |
+          Unencrypted bank details and passport scans are a high risk to staff,
+          and you can't show nobody opened them. Farah decides to notify the
+          regulator and the 262 staff.
+    effects:
+      set: [assessment_done]
+
+  - id: email_all_now
+    group: communicate
+    when: not assessment_done
+    label: Email all staff now to say their data has been stolen
+    takes: 10
+    result: |
+      The email causes alarm. Doctors who were never in the payroll file ask if
+      patient records are gone, and the local paper gets hold of a screenshot.
+    effects:
+      trust: -15
+      compliance: -5
+    lesson: |
+      Speed matters, but the first message has to be right. Finding out exactly
+      which files and which people are affected takes half an hour and avoids
+      frightening the wrong people.
+
+  - id: notify_regulator
+    group: communicate
+    when: assessment_done
+    label: Send the breach notification to the regulator with the privacy officer
+    takes: 30
+    result: The notification is filed with the facts you have and a note on what you are still checking.
+    effects:
+      set: [regulator_notified]
+      compliance: 15
+
+  - id: notify_staff
+    group: communicate
+    when: assessment_done
+    label: Tell the affected staff what happened and what to watch for
+    takes: 30
+    result: |
+      The letter explains which data was involved, what you have done, and how
+      to spot fraud attempts. HR sets up a help line. Most replies are calm.
+    effects:
+      set: [staff_notified]
+      trust: 15
+
+  - id: fix_exceptions
+    group: recover
+    label: Encrypt the other five laptops on the exception list and retire the exception
+    takes: 30
+    result: IT finds a newer version of the payroll plugin that works with encryption. All five laptops are encrypted by the afternoon.
+    effects:
+      set: [exceptions_fixed]
+
+  - id: discipline_daniel
+    group: coordinate
+    label: Start a disciplinary process against Daniel
+    takes: 15
+    result: HR opens a case. Word gets round quickly, and two other people quietly decide not to mention the USB sticks they lost last month.
+    effects:
+      trust: -20
+    lesson: |
+      Daniel reported the loss the moment he noticed it. Punishing prompt
+      reporting teaches everyone else to stay quiet. The real failure was the
+      encryption exception, not the person.
+
+  - id: close
+    group: coordinate
+    when: privacy_told
+    label: Write up the incident and close it
+    takes: 10
+    result: You write up the timeline and actions and close the incident.
+    effects:
+      end:
+        outcome: close
+        text: You closed the incident.
+
+rules:
+  - id: live_sessions
+    when: not sessions_revoked
+    every: 1h
+    effects:
+      exposure: 5
+
+objectives:
+  - text: Find out within the hour whether the data was protected
+    pass: did.check_mdm and at.check_mdm <= 60
+    weight: 2
+    hit: You checked the device record early and learned it was not encrypted. Everything else depends on that one fact.
+    miss: You didn't check the device record quickly. Whether the disk was encrypted decides whether this is a breach at all.
+
+  - text: Have a wipe waiting before the laptop comes back online
+    pass: seen.device_wiped
+    weight: 2
+    hit: The wipe was queued when the laptop came online at 11:10, so it ran straight away.
+    miss: The laptop came online at 11:10 with no wipe queued, and someone opened the payroll file.
+
+  - text: Cut off what the laptop could still reach
+    pass: sessions_revoked and at.revoke_daniel <= 120
+    weight: 2
+    hit: You revoked Daniel's sessions, so the saved logins in his browser became useless.
+    miss: Saved browser sessions on a lost laptop are a live key to HR and payroll. Revoke them early.
+
+  - text: Tell the privacy officer within four hours
+    pass: privacy_told and at.tell_privacy <= 240
+    weight: 2
+    hit: The privacy officer heard from you, in time, as the policy requires.
+    miss: The privacy officer heard late or not from you. Regulators judge you on when you knew, not when you got round to it.
+
+  - text: Base the notification decision on facts
+    pass: assessment_done
+    weight: 2
+    hit: You got the exact file list and decided with the privacy officer. That made the notifications accurate.
+    miss: You never completed the assessment, so nobody could decide properly whether to notify.
+
+  - text: Notify the regulator and the people affected
+    pass: regulator_notified and staff_notified
+    weight: 2
+    hit: The regulator and the 262 staff were told, with facts and practical advice.
+    miss: Unencrypted bank details and passport scans are a notifiable risk. The regulator and the staff needed to hear.
+
+  - text: Fix the weakness that turned a lost laptop into a breach
+    pass: exceptions_fixed
+    weight: 1
+    hit: You closed the encryption exception, so the next lost laptop is only a lost laptop.
+    miss: Five other laptops are still unencrypted. The next loss will be the same story.
+
+  - text: Communicate accurately, not just quickly
+    pass: not did.email_all_now
+    weight: 1
+    hit: You waited until you knew who was affected before writing to anyone.
+    miss: The early all-staff email frightened people who were not affected and leaked to the press.
+
+  - text: Keep people willing to report mistakes
+    pass: not did.discipline_daniel
+    weight: 1
+    hit: You treated Daniel's prompt report as the right thing to do.
+    miss: Disciplining Daniel discourages the fast reporting that saved you time today.
+
+solution:
+  - check_mdm
+  - queue_wipe
+  - ask_daniel
+  - revoke_daniel
+  - tell_privacy
+  - review_sync
+  - report_loss
+  - assess_notify
+  - notify_regulator
+  - notify_staff
+  - fix_exceptions
+  - close
+
+references:
+  - NIST SP 800-61r3 (April 2025), incident response as a CSF 2.0 profile
+  - Your own data protection law's rules on breach notification (many, such as GDPR Article 33, set a 72-hour deadline)

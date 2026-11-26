@@ -1,0 +1,380 @@
+id: fileserver-ransomware
+title: Files with a new extension
+level: intermediate
+minutes: 25
+sector: Engineering consultancy
+org: Ashford & Lane Engineering (fictional)
+role: You are the IT and security manager.
+summary: Monday morning, the file server is being encrypted. Stop it, save the backups, close the way in and restore without getting hit again.
+start: Mon 07:40
+limit: 12h
+pass: 70
+
+briefing: |
+  Ashford & Lane is a 250-person engineering consultancy. Project files live
+  on one Windows file server. Backups go nightly to a NAS on the office
+  network, and every Saturday a copy goes to an offline, immutable cloud
+  vault that nobody can change for 30 days.
+
+  You have an incident response retainer through the cyber insurer.
+
+meters:
+  spread:
+    label: Attacker reach
+    start: 30
+    good: low
+  impact:
+    label: Business disruption
+    start: 40
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+
+injects:
+  - id: tickets
+    at: 0
+    from: Service desk
+    via: ticket
+    subject: Three tickets in five minutes
+    body: |
+      - "Can't open anything on the S: drive. Files end in .lck"
+      - "My project folder has a text file called README_RESTORE.txt"
+      - "Is the server down? Drawings won't open"
+
+  - id: ransom_note
+    at: 5
+    from: README_RESTORE.txt
+    via: letter
+    subject: Your files are encrypted
+    body: |
+      Your network has been encrypted by PALE MOTH. We have also copied 300 GB
+      of your data. Contact us within 72 hours through the link below, or we
+      publish your data and the price doubles. Do not contact police. Do not
+      try to restore.
+
+  - id: nas_hit
+    at: 25
+    when: not nas_disconnected
+    from: Backup NAS
+    via: alert
+    subject: Backup job verification failed
+    body: |
+      The backup share on the NAS is unreadable. Every backup file now ends in
+      .lck. The nightly backups are gone.
+    effects:
+      set: [nas_lost]
+      impact: 10
+
+  - id: ceo_call
+    at: 60
+    from: Victoria Lane, CEO
+    via: call
+    subject: Can we just pay?
+    body: |
+      "I've read the note. How long until we're working again? Honestly, if
+      paying gets us back by tonight, isn't that cheaper? Tell me straight."
+
+  - id: erp_hit
+    at: 90
+    when: not svc_disabled and not admin02_isolated
+    from: Service desk
+    via: ticket
+    subject: Finance system down
+    body: |
+      The finance and timesheet server has stopped responding. Its shared
+      folders are full of .lck files and the same README.
+    effects:
+      set: [erp_hit]
+      spread: 20
+      impact: 20
+
+  - id: ir_firm
+    when: insurer_called and time >= at.call_insurer + 120
+    from: Insurer's incident response firm
+    via: email
+    subject: Engagement confirmed
+    body: |
+      Our team is now engaged. Please don't wipe or rebuild anything before we
+      have images of the affected servers. Recommendation: keep isolating,
+      reset privileged accounts, and restore only from the offline copy.
+
+actions:
+  - id: isolate_fs
+    group: contain
+    label: Disconnect the file server from the network
+    takes: 5
+    result: The file server is off the network. Encryption of its shares stops spreading to users' mapped drives.
+    effects:
+      set: [fs_isolated]
+      spread: -10
+
+  - id: disconnect_nas
+    group: contain
+    label: Disconnect the backup NAS from the network
+    takes: 5
+    result:
+      - when: nas_lost
+        text: You unplug the NAS, but the backup files on it are already encrypted.
+      - text: The NAS is unplugged. Its backups from last night are safe for now.
+    effects:
+      set: [nas_disconnected]
+
+  - id: trace_source
+    group: investigate
+    label: Check the file server's security log to see which account and host ran the encryption
+    takes: 30
+    result: |
+      The encryption ran under **svc_backup**, a service account with domain
+      admin rights, from **IT-ADMIN02**, an old admin workstation. The account
+      first signed in there at 02:14 from an unusual IP address on the VPN.
+    effects:
+      set: [source_known]
+
+  - id: disable_svc
+    group: contain
+    when: source_known
+    label: Disable the svc_backup account
+    takes: 5
+    result: svc_backup is disabled. Last night's backup job will fail, which is fine for today.
+    effects:
+      set: [svc_disabled]
+      spread: -10
+
+  - id: isolate_admin02
+    group: contain
+    when: source_known
+    label: Isolate IT-ADMIN02
+    takes: 5
+    result: IT-ADMIN02 is off the network.
+    effects:
+      set: [admin02_isolated]
+      spread: -10
+
+  - id: reset_privileged
+    group: contain
+    when: source_known
+    label: Reset every admin and service account password, and reset the domain's Kerberos key twice
+    takes: 1h
+    result: All privileged accounts have new passwords and the Kerberos key has been reset twice. Old tickets the attacker might hold no longer work.
+    effects:
+      set: [creds_reset]
+      spread: -15
+
+  - id: check_offline_backup
+    group: investigate
+    label: Test a restore from Saturday's offline cloud copy
+    takes: 45
+    result: A test folder restores perfectly. The Saturday copy is complete and clean, so you lose Saturday night to Monday morning at worst.
+    effects:
+      set: [backup_verified]
+
+  - id: image_fs
+    group: investigate
+    when: fs_isolated
+    label: Take a forensic image of the file server before anything is rebuilt
+    takes: 45
+    result: The disks are imaged and hashed. Investigators can work on the copy while you rebuild.
+    effects:
+      set: [fs_imaged]
+
+  - id: call_insurer
+    group: coordinate
+    label: Call the cyber insurer's incident hotline
+    takes: 20
+    result: The insurer opens a claim and engages its incident response firm. They will be in touch within two hours.
+    effects:
+      set: [insurer_called]
+
+  - id: report_police
+    group: coordinate
+    label: Report the attack to the police
+    takes: 20
+    result: You file a report and get a reference number.
+    effects:
+      set: [police_report]
+
+  - id: staff_update
+    group: communicate
+    label: "Tell staff what is happening: don't use the S: drive, don't restart PCs, report anything odd"
+    takes: 15
+    result: Staff switch to local copies and email for the morning. Two people report odd pop-ups, which turn out to be unrelated.
+    effects:
+      set: [staff_told]
+      impact: -5
+
+  - id: brief_ceo
+    group: communicate
+    label: "Brief the CEO: restore from the offline copy instead of paying, and why"
+    takes: 20
+    result: |
+      You explain that the offline copy works, that paying funds the group with
+      no promise of deletion, and that the insurer's firm is on its way.
+      Victoria agrees to restore, not pay.
+    effects:
+      set: [ceo_briefed]
+
+  - id: pay_ransom
+    group: coordinate
+    label: Contact the attackers and agree to pay
+    takes: 1h
+    result: |
+      After a day of haggling you get a decryptor. It is slow and corrupts a
+      third of the large drawing files. The group keeps your 300 GB anyway.
+    effects:
+      set: [paid]
+      impact: 10
+    lesson: |
+      With a clean, tested offline backup, paying buys almost nothing. It funds
+      the next attack, it may be illegal if the group is sanctioned, and stolen
+      data is rarely deleted. Restore, and handle the leak as a data breach.
+
+  - id: isolate_erp
+    group: contain
+    when: erp_hit
+    label: Isolate the finance server
+    takes: 10
+    result: The finance server is off the network.
+    effects:
+      set: [erp_isolated]
+      spread: -5
+
+  - id: rebuild_restore
+    group: recover
+    when: backup_verified and fs_isolated
+    label: Rebuild the file server and restore from Saturday's offline copy
+    takes: 6h
+    result: The rebuild finishes and the shares come back with Saturday's data.
+    effects:
+      set: [restore_done]
+
+  - id: restore_again
+    group: recover
+    when: reinfected and svc_disabled and admin02_isolated and creds_reset
+    label: Rebuild and restore the file server again, now that the way in is closed
+    takes: 6h
+    result: This time the shares come back and stay clean.
+    effects:
+      set: [restored]
+      impact: -30
+
+  - id: close
+    group: coordinate
+    when: restored
+    label: Hand over to the investigators and close the incident
+    takes: 10
+    result: You write up the incident, hand over to the investigators and close the incident.
+    effects:
+      end:
+        outcome: close
+        text: The file server is back and the investigation continues with the images.
+
+rules:
+  - id: reinfection
+    when: restore_done and not (svc_disabled and admin02_isolated and creds_reset)
+    effects:
+      set: [reinfected]
+      spread: 20
+      impact: 20
+    text: Two hours after the restore, files start to change to .lck again. The attacker still had a way in.
+
+  - id: clean_restore
+    when: restore_done and not reinfected
+    effects:
+      set: [restored]
+      impact: -40
+
+  - id: encryption_running
+    when: not fs_isolated
+    every: 15
+    effects:
+      spread: 5
+      impact: 5
+
+  - id: attacker_present
+    when: not svc_disabled
+    every: 30
+    effects:
+      spread: 5
+
+  - id: evidence_gone
+    when: restore_done and not fs_imaged
+    effects:
+      evidence: -60
+    text: The rebuild overwrote the file server's disks. The investigators have nothing to examine.
+
+objectives:
+  - text: Stop the encryption on the file server within 20 minutes
+    pass: fs_isolated and at.isolate_fs <= 20
+    weight: 2
+    hit: You took the file server off the network fast.
+    miss: The file server stayed connected while it was being encrypted.
+
+  - text: Protect the backups
+    pass: not nas_lost
+    weight: 2
+    hit: You unplugged the NAS before the attacker reached it. Ransomware groups go after backups early.
+    miss: The NAS backups were encrypted. Backups on the same network as the attacker are a target, not a safety net.
+
+  - text: Find and close the attacker's way in
+    pass: svc_disabled and admin02_isolated and creds_reset
+    weight: 3
+    hit: You disabled the account, isolated the admin workstation and reset privileged credentials.
+    miss: Part of the attacker's access stayed open. The account, the workstation and the privileged credentials all need dealing with.
+
+  - text: Prove the backup works before you depend on it
+    pass: backup_verified
+    weight: 1
+    hit: You tested a restore before planning the recovery around it.
+    miss: You never tested the offline copy.
+
+  - text: Keep evidence before rebuilding
+    pass: fs_imaged and at.image_fs < at.rebuild_restore
+    weight: 1
+    hit: You imaged the server before rebuilding it.
+    miss: The server was rebuilt without an image. Investigators and the insurer needed it.
+
+  - text: Restore without being hit again
+    pass: restored and not reinfected
+    weight: 2
+    hit: The restore was clean the first time, because the way in was closed first.
+    miss: Either the restore never finished or it was encrypted again because the attacker still had access.
+
+  - text: Bring in help and report it
+    pass: insurer_called and police_report
+    weight: 1
+    hit: The insurer's responders and the police were involved early.
+    miss: You didn't bring in the insurer or the police.
+
+  - text: Make sure leaders and staff know the plan
+    pass: ceo_briefed and staff_told
+    weight: 1
+    hit: The CEO backed the restore plan and staff knew what to do.
+    miss: The CEO or the staff were left guessing.
+
+  - text: Don't pay when you can restore
+    pass: not paid
+    weight: 1
+    hit: You restored from a clean copy and didn't fund the attackers.
+    miss: You paid even though a tested backup existed.
+
+solution:
+  - isolate_fs
+  - disconnect_nas
+  - staff_update
+  - trace_source
+  - disable_svc
+  - isolate_admin02
+  - call_insurer
+  - brief_ceo
+  - reset_privileged
+  - check_offline_backup
+  - image_fs
+  - report_police
+  - rebuild_restore
+  - close
+
+references:
+  - CISA and partners, #StopRansomware Guide
+  - NIST SP 800-61r3 (April 2025), incident response as a CSF 2.0 profile

@@ -1,0 +1,361 @@
+id: phishing-click
+title: The click
+level: beginner
+minutes: 15
+sector: Logistics
+org: Harbor Line Logistics (fictional)
+role: You are the IT security lead on duty.
+summary: An accounts clerk typed her password into a fake sign-in page. Find out what the attacker got and shut them out.
+start: Tue 09:12
+limit: 3h
+pass: 70
+
+briefing: |
+  It is Tuesday morning at Harbor Line Logistics, a 400-person freight company.
+  The service desk forwards a message to you from **Priya Shah** in Accounts
+  Payable.
+
+  Staff sign in with a password and an approval prompt on their phone.
+
+  Read your inbox, decide what to do and watch what happens. Every action
+  takes time, and the clock keeps running while you think it through.
+
+meters:
+  spread:
+    label: Attacker access
+    start: 10
+    good: low
+    help: How much of your environment the attacker can reach.
+  trust:
+    label: Partner trust
+    start: 80
+    good: high
+    help: How customers and suppliers see you.
+  impact:
+    label: Business disruption
+    start: 0
+    good: low
+
+injects:
+  - id: priya_email
+    at: 0
+    from: Priya Shah, Accounts Payable
+    via: email
+    subject: I think I did something stupid
+    body: |
+      Hi, sorry to bother you. About ten minutes ago I got an email saying a
+      supplier had shared a statement with me. I clicked it and it asked me to
+      sign in, so I did. Then the page just went blank.
+
+      It looked exactly like our normal sign-in page. Is that bad?
+
+      Priya
+    effects:
+      set: [token_stolen]
+
+  - id: omar_chat
+    at: 5
+    from: Omar Haddad, Sales
+    via: chat
+    subject: Weird email
+    body: |
+      Hey, did IT send something about a shared statement? I have one in my
+      inbox from a supplier I've never heard of. Haven't opened it.
+
+  - id: active_alert
+    when: time >= 25 and not sessions_revoked
+    from: Identity provider
+    via: alert
+    subject: "Unfamiliar sign-in properties: priya.shah"
+    body: |
+      A session for **priya.shah** was used from an IP address that belongs to
+      a hosting provider in another country. Mailbox and file access followed.
+      Risk level: high.
+    effects:
+      set: [attacker_active]
+      spread: 20
+
+  - id: second_victim
+    at: 45
+    when: not purged and not staff_warned
+    from: Service desk
+    via: chat
+    subject: Another one
+    body: |
+      Omar from Sales just called. He opened that shared statement email after
+      all and typed his password in before he realized. He's worried.
+    effects:
+      set: [omar_phished]
+      spread: 15
+
+  - id: prompt_again
+    when: sessions_revoked and not creds_reset and time >= at.revoke_sessions + 20
+    from: Priya Shah, Accounts Payable
+    via: chat
+    subject: Another prompt on my phone
+    body: |
+      I just got another sign-in approval request on my phone. I didn't touch
+      it this time. Is someone still trying to get in?
+
+  - id: fraud_report
+    when: attacker_active and not sessions_revoked and time >= at.active_alert + 45
+    from: Lena Fischer, Baltic Cargo Partners
+    via: email
+    subject: "Re: Updated bank details"
+    body: |
+      Hello, we received a message from Priya asking us to send next week's
+      payment to a new bank account. It didn't feel right, so I'm checking with
+      you first. Can you confirm whether this is genuine?
+    effects:
+      set: [fraud_sent]
+      trust: -25
+      impact: 10
+
+actions:
+  - id: ask_priya
+    group: investigate
+    label: Call Priya and ask exactly what happened
+    takes: 10
+    result: |
+      Priya says she typed her email address and password into the page. A
+      moment later her phone showed a sign-in approval request and she tapped
+      **Approve**, because she thought it was part of the same page. That was
+      around 09:05.
+
+      That detail matters: the fake page passed her approval straight through to
+      the real sign-in. The attacker is likely holding a **valid session**, not
+      just her password.
+    effects:
+      set: [knows_approved]
+
+  - id: check_signins
+    group: investigate
+    label: Review Priya's sign-in log
+    takes: 15
+    result:
+      - when: sessions_revoked
+        text: |
+          The log shows a sign-in at 09:06 from a hosting provider abroad that
+          passed the approval prompt. That session ended when you revoked her
+          sessions.
+      - when: attacker_active
+        text: |
+          At 09:06 a sign-in from a hosting provider abroad passed the approval
+          prompt. That session is **active right now** and is reading her
+          mailbox and files.
+      - text: |
+          At 09:06 a sign-in from a hosting provider abroad passed the approval
+          prompt. The session is still valid. Nothing has used it yet, but that
+          won't last.
+
+  - id: reset_password
+    group: contain
+    label: Reset Priya's password
+    takes: 5
+    result:
+      - when: sessions_revoked
+        text: The password is reset. With her sessions already revoked, the attacker has nothing left to sign in with.
+      - text: |
+          The password is reset. Note that sessions that already exist stay valid
+          until they expire or someone revokes them.
+    effects:
+      set: [creds_reset]
+
+  - id: revoke_sessions
+    group: contain
+    label: Revoke all of Priya's sessions and re-register her phone
+    takes: 5
+    result:
+      - when: creds_reset
+        text: Every session for Priya is revoked and her phone is registered again. The attacker is out.
+      - text: |
+          Every session for Priya is revoked and her phone is registered again.
+          The attacker still knows her password, though, so they can try to sign
+          in again.
+    effects:
+      set: [sessions_revoked]
+      spread: -20
+
+  - id: check_mailbox
+    group: investigate
+    label: Check Priya's mailbox for new rules, forwarding and sent mail
+    takes: 10
+    result:
+      - when: rule_created
+        text: |
+          You find an inbox rule nobody asked for. Mail containing "invoice" or
+          "payment" is forwarded to an outside address and moved to a folder she
+          never opens. The attacker was setting up invoice fraud.
+      - text: No new rules, no forwarding and nothing unusual in Sent Items. Good to have checked.
+    effects:
+      set: [mailbox_checked]
+
+  - id: remove_rule
+    group: contain
+    when: did.check_mailbox and rule_created
+    label: Delete the forwarding rule and block automatic forwarding to outside addresses
+    takes: 5
+    result: The rule is gone, and automatic forwarding outside the company is now blocked for everyone.
+    effects:
+      set: [rule_removed]
+
+  - id: purge_emails
+    group: contain
+    label: Search all mailboxes for the phishing email and delete every copy
+    takes: 20
+    result: The same email reached 37 mailboxes. Every copy is now deleted.
+    effects:
+      set: [purged]
+
+  - id: block_domain
+    group: contain
+    label: Block the fake sign-in site on the mail gateway and web proxy
+    takes: 5
+    result: The domain is blocked. Anyone who clicks an old copy of the link now sees a block page.
+    effects:
+      set: [domain_blocked]
+
+  - id: warn_staff
+    group: communicate
+    label: Send all staff a short warning about the email
+    takes: 10
+    result: |
+      Your note goes out with a screenshot of the email and one instruction:
+      if you typed your password, call the service desk now. Three people reply
+      to say they reported it already. Nobody else admits to clicking.
+    effects:
+      set: [staff_warned]
+      trust: 5
+
+  - id: reset_omar
+    group: contain
+    when: seen.second_victim
+    label: Reset Omar's password and revoke his sessions
+    takes: 10
+    result: Omar's password is reset and his sessions are revoked before anyone uses them.
+    effects:
+      set: [omar_secured]
+      spread: -10
+
+  - id: warn_partners
+    group: communicate
+    when: fraud_sent
+    label: Tell Baltic Cargo and other contacts that the bank change request is fake
+    takes: 15
+    result: |
+      You confirm to Lena that the request is fake and ask Finance to call
+      Priya's other regular contacts. Nobody has paid anything.
+    effects:
+      set: [partners_warned]
+      trust: 15
+
+  - id: open_ticket
+    group: coordinate
+    label: Open an incident ticket and start a timeline
+    takes: 5
+    result: The ticket is open. From now on you note each step with the time, which will help when you write it up.
+    effects:
+      set: [ticket_open]
+
+  - id: reimage_laptop
+    group: recover
+    label: Take Priya's laptop and reimage it
+    takes: 90
+    result: |
+      The laptop is rebuilt and Priya loses her morning. The rebuild found
+      nothing: no malware ran. This attack happened on a web page, not on her
+      laptop.
+    effects:
+      impact: 15
+    lesson: |
+      Credential phishing through a fake page usually leaves nothing on the
+      device. The fix lives in the identity system: the password, the sessions,
+      the phone registration and the mailbox. Reimaging cost an hour and a half
+      the attacker could use.
+
+  - id: close
+    group: coordinate
+    when: creds_reset or sessions_revoked
+    label: Write a short summary and close the incident
+    takes: 10
+    result: You write up what happened and close the ticket.
+    effects:
+      end:
+        outcome: close
+        text: You closed the incident.
+
+rules:
+  - id: rule_planted
+    when: attacker_active and not sessions_revoked and time >= at.active_alert + 15
+    effects:
+      set: [rule_created]
+
+  - id: attacker_working
+    when: attacker_active and not sessions_revoked
+    every: 15
+    effects:
+      spread: 10
+
+  - id: forwarding_leak
+    when: rule_created and not rule_removed
+    every: 30
+    effects:
+      trust: -5
+
+objectives:
+  - text: Shut the attacker out of Priya's account completely
+    pass: creds_reset and sessions_revoked
+    weight: 3
+    hit: You reset the password and revoked her sessions. The fake page captured a live session, so a password reset alone would not have been enough.
+    miss: The attacker kept a way in. A fake page that relays the approval prompt hands over a live session, so you need both a password reset and a session revoke.
+
+  - text: Act before the stolen session gets used
+    pass: at.revoke_sessions < at.active_alert
+    weight: 2
+    hit: You revoked the sessions before the attacker started using them. Speed was the whole game here.
+    miss: The attacker got to use the session first. Asking Priya what she approved, then revoking straight away, would have beaten them.
+
+  - text: Check the mailbox for anything the attacker changed
+    pass: mailbox_checked and (not rule_created or rule_removed)
+    weight: 2
+    hit: You checked the mailbox, and dealt with the forwarding rule if there was one. Attackers often leave rules behind so they keep getting mail after you lock them out.
+    miss: You didn't check the mailbox properly. A hidden forwarding rule keeps leaking mail even after the password is changed.
+
+  - text: Stop the same email from catching anyone else
+    pass: purged and (not omar_phished or omar_secured)
+    weight: 2
+    hit: You removed every copy of the email and handled anyone else who clicked.
+    miss: The email stayed in other inboxes, or a second victim was left with a live account. Omar's message at 09:17 was the hint.
+
+  - text: Warn partners if the attacker reached them
+    pass: not fraud_sent or partners_warned
+    weight: 1
+    hit: Either the attacker never got to your partners, or you warned them in time.
+    miss: A partner received a fake bank change request from Priya's account and you didn't follow up.
+
+  - text: Keep a record from the start
+    pass: did.open_ticket and at.open_ticket <= 30
+    weight: 1
+    hit: You opened a ticket early, so your timeline is reliable.
+    miss: No ticket in the first half hour. Notes written later are always less accurate.
+
+  - text: Fix the real problem, not the laptop
+    pass: not did.reimage_laptop
+    weight: 1
+    hit: You didn't waste time rebuilding a laptop that was never infected.
+    miss: Reimaging the laptop cost time and did nothing against an attacker holding her session.
+
+solution:
+  - open_ticket
+  - ask_priya
+  - revoke_sessions
+  - reset_password
+  - warn_staff
+  - purge_emails
+  - check_mailbox
+  - block_domain
+  - close
+
+references:
+  - NIST SP 800-61r3, Incident Response Recommendations and Considerations for Cybersecurity Risk Management (April 2025)
+  - CISA, Phishing guidance and phishing-resistant MFA fact sheets

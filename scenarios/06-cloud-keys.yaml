@@ -1,0 +1,303 @@
+id: cloud-keys
+title: The bill that jumped
+level: intermediate
+minutes: 20
+sector: Software
+org: Lumen Analytics (fictional)
+role: You are the engineer on call for security this weekend.
+summary: A leaked access key is mining crypto in your cloud account at 3 a.m. Kill the key, find the backdoor, and work out what data was touched.
+start: Sun 03:10
+limit: 8h
+pass: 70
+
+briefing: |
+  Lumen Analytics is a 60-person software company that runs its product in
+  one public cloud account. Customer report exports are kept in a storage
+  bucket called **customer-exports**.
+
+  Your phone has just woken you up. You have admin access to the cloud
+  account from your laptop.
+
+meters:
+  spread:
+    label: Attacker access
+    start: 40
+    good: low
+  cost:
+    label: Cloud bill damage
+    start: 20
+    good: low
+  exposure:
+    label: Customer data exposure
+    start: 0
+    good: low
+
+injects:
+  - id: budget_alert
+    at: 0
+    from: Cloud billing
+    via: alert
+    subject: Budget alert, forecast at 1,060%
+    body: |
+      Spend in the last 24 hours: **4,180**. Forecast for this month:
+      **96,000**. Your monthly budget is 9,000. Most of the spend is GPU
+      instances in two regions you normally don't use.
+    effects:
+      set: [backdoor_user]
+
+  - id: abuse_notice
+    at: 10
+    from: Cloud provider trust and safety
+    via: email
+    subject: "Abuse report: cryptocurrency mining"
+    body: |
+      We have detected cryptocurrency mining from 38 instances in your
+      account. Please investigate. Accounts used for abuse may be restricted.
+
+  - id: dev_chat
+    at: 40
+    from: Ana Ruiz, Developer
+    via: chat
+    subject: Could this be me?
+    body: |
+      Saw the alerts in the channel. On Friday I accidentally pushed a .env
+      file to our public demo repo. It had the CI deploy key in it. I deleted
+      the commit within an hour. Could that be it? So sorry.
+
+  - id: more_regions
+    at: 60
+    when: not key_disabled
+    from: Cloud billing
+    via: alert
+    subject: New spend in three more regions
+    body: GPU instances are now running in five regions. Spend rate has doubled.
+    effects:
+      spread: 10
+      cost: 15
+
+  - id: backdoor_used
+    at: 90
+    when: backdoor_user and not backdoor_removed
+    from: Cloud security monitor
+    via: alert
+    subject: Instances launched by IAM user "support-backup"
+    body: |
+      An IAM user called **support-backup** just launched 20 GPU instances.
+      This user has administrator rights. It was created on Saturday at 22:47.
+    effects:
+      spread: 15
+      cost: 10
+
+actions:
+  - id: deactivate_key
+    group: contain
+    label: Deactivate the leaked CI access key
+    takes: 5
+    result: The key is deactivated. Anything using it now gets "access denied", including your own CI pipeline, which can wait until Monday.
+    effects:
+      set: [key_disabled]
+      spread: -15
+
+  - id: open_bridge
+    group: coordinate
+    label: Call the CTO and open an incident bridge
+    takes: 10
+    result: Kenji, the CTO, joins the call. He'll handle the business side and the provider; you keep working the technical side.
+    effects:
+      set: [bridge_open]
+
+  - id: review_audit
+    group: investigate
+    label: Review the API audit log for everything the key did since Friday
+    takes: 30
+    result:
+      - when: data_read
+        text: |
+          From Saturday 21:30 the key listed every bucket, **downloaded files
+          from customer-exports**, created an IAM user called
+          **support-backup** with administrator rights and an access key, and
+          launched GPU instances in several regions.
+      - text: |
+          From Saturday 21:30 the key listed every bucket, created an IAM user
+          called **support-backup** with administrator rights and an access
+          key, and launched GPU instances in several regions. No reads from
+          customer-exports so far.
+    effects:
+      set: [audit_reviewed]
+
+  - id: remove_backdoor
+    group: contain
+    when: audit_reviewed
+    label: Delete the support-backup user and its keys, and check for other new users, roles and functions
+    takes: 10
+    result: support-backup and its key are gone. You find no other new identities, roles or functions.
+    effects:
+      set: [backdoor_removed]
+      spread: -25
+
+  - id: snapshot_evidence
+    group: investigate
+    when: not instances_terminated
+    label: Snapshot one rogue instance's disk and save its metadata before terminating
+    takes: 15
+    result: One instance's disk snapshot and metadata are saved in a locked-down evidence account.
+    effects:
+      set: [snapshot_kept]
+
+  - id: terminate_instances
+    group: contain
+    label: Terminate the rogue instances in every region
+    takes: 20
+    result: All rogue instances are terminated across all regions.
+    effects:
+      set: [instances_terminated]
+
+  - id: contact_provider
+    group: coordinate
+    label: Open a support case with the provider about the abuse and the bill
+    takes: 15
+    result: The provider confirms the account is not being restricted and opens a billing review for the fraudulent usage.
+    effects:
+      set: [provider_case]
+      cost: -10
+
+  - id: check_data
+    group: investigate
+    when: audit_reviewed
+    label: Work out exactly what was read from customer-exports
+    takes: 20
+    result:
+      - when: data_read
+        text: |
+          The key downloaded 46 export files, 1.2 GB, belonging to three
+          customers. They include names and email addresses of the customers'
+          own users.
+      - text: Nothing was read from customer-exports. The attacker only listed the bucket names.
+    effects:
+      set: [data_scoped]
+
+  - id: notify_customers
+    group: communicate
+    when: data_scoped and data_read
+    label: Notify the three affected customers with the facts
+    takes: 30
+    result: Kenji calls the three customers and follows up in writing. They are unhappy but grateful to hear it from you first.
+    effects:
+      set: [customers_notified]
+
+  - id: rotate_secrets
+    group: recover
+    label: Rotate every secret that was in the leaked .env file
+    takes: 45
+    result: The database password, two API tokens and the CI key are replaced. The pipeline runs again with the new key.
+    effects:
+      set: [secrets_rotated]
+
+  - id: clean_repo
+    group: recover
+    label: Purge the file from the repo history and turn on secret scanning with push protection
+    takes: 30
+    result: The file is removed from history, forks are checked, and pushes containing secrets are now blocked.
+    effects:
+      set: [repo_cleaned]
+
+  - id: deny_regions
+    group: recover
+    label: Block the regions you don't use with an organization-wide policy
+    takes: 20
+    result: Only your two working regions accept new resources now.
+    effects:
+      set: [regions_blocked]
+
+  - id: close
+    group: coordinate
+    when: key_disabled
+    label: Write up the incident and close it
+    takes: 10
+    result: You write up the timeline and close the incident.
+    effects:
+      end:
+        outcome: close
+        text: You closed the incident.
+
+rules:
+  - id: key_in_use
+    when: not key_disabled
+    every: 15
+    effects:
+      spread: 5
+      cost: 5
+
+  - id: mining
+    when: not instances_terminated
+    every: 30
+    effects:
+      cost: 5
+
+  - id: data_theft
+    when: time >= 50 and not key_disabled
+    effects:
+      set: [data_read]
+      exposure: 40
+
+objectives:
+  - text: Kill the leaked key within 30 minutes
+    pass: key_disabled and at.deactivate_key <= 30
+    weight: 3
+    hit: You deactivated the key straight away. Investigation can wait five minutes; a live key can't.
+    miss: The leaked key stayed live too long.
+
+  - text: Find and remove the backdoor
+    pass: backdoor_removed
+    weight: 3
+    hit: You found the support-backup user in the audit log and removed it. Killing the original key alone would have left the attacker in.
+    miss: The attacker's own admin user survived. Always check what a leaked key created, not just what it is.
+
+  - text: Stop the mining and start on the bill
+    pass: instances_terminated and provider_case
+    weight: 2
+    hit: The instances are gone and the provider is reviewing the bill.
+    miss: Mining kept running, or nobody asked the provider for help with the bill.
+
+  - text: Keep evidence before cleaning up
+    pass: snapshot_kept and audit_reviewed
+    weight: 1
+    hit: You kept a snapshot and reviewed the audit log before terminating.
+    miss: Terminating without a snapshot, or without the audit log, leaves nothing to investigate later.
+
+  - text: Know what data was touched, and act on it
+    pass: data_scoped and (not data_read or customers_notified)
+    weight: 2
+    hit: You worked out exactly what was read and told the people affected, if anyone was.
+    miss: You didn't establish what was read from customer-exports, or didn't tell the customers whose data left.
+
+  - text: Fix the root cause
+    pass: secrets_rotated and repo_cleaned
+    weight: 2
+    hit: Every leaked secret is rotated and the repo can't leak secrets the same way again.
+    miss: Other secrets from the same file are still valid, or the repo can leak again.
+
+  - text: Limit the damage next time
+    pass: regions_blocked
+    weight: 1
+    hit: Unused regions are blocked, so the next leaked key can do far less.
+    miss: Any future leaked key can still spin up resources anywhere in the world.
+
+solution:
+  - deactivate_key
+  - open_bridge
+  - review_audit
+  - remove_backdoor
+  - snapshot_evidence
+  - terminate_instances
+  - contact_provider
+  - check_data
+  - rotate_secrets
+  - clean_repo
+  - deny_regions
+  - close
+
+references:
+  - Your cloud provider's guidance on compromised credentials and exposed access keys
+  - GitHub documentation on secret scanning and push protection
+  - NIST SP 800-61r3 (April 2025), incident response as a CSF 2.0 profile

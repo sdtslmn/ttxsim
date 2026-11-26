@@ -1,0 +1,337 @@
+id: sis-trip
+title: The safety system tripped
+level: ot
+minutes: 25
+sector: Oil and gas processing
+org: North Ridge Gas Processing (fictional)
+role: You are the site OT security engineer, on call tonight.
+summary: A safety instrumented system trips a unit in the middle of the night and its controller is in program mode. Hold the restart until you know the SIS can be trusted.
+start: Mon 02:10
+limit: 8h
+pass: 70
+
+briefing: |
+  North Ridge processes natural gas in two units. Each unit has a safety
+  instrumented system (SIS), separate from the control system, that shuts the
+  unit down if pressure, temperature or flow go outside safe limits.
+
+  Each SIS controller has a physical keyswitch. It must stay in **RUN**.
+  **PROGRAM** allows changes to the safety logic and is only used under a
+  permit with the SIS vendor. Engineers program the SIS from an engineering
+  workstation (EWS) in the control building. An offline master copy of each
+  unit's safety logic is kept in the site safe.
+
+meters:
+  safety:
+    label: Process safety
+    start: 85
+    good: high
+  loss:
+    label: Production loss
+    start: 20
+    good: low
+  spread:
+    label: Attacker reach
+    start: 40
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+
+injects:
+  - id: trip_call
+    at: 0
+    from: Ahmed Saleh, Shift Supervisor
+    via: call
+    subject: Unit 2 tripped
+    body: |
+      "Unit 2 tripped at 02:04. The SIS shut it down cleanly and we can't see
+      any process upset that would explain it. The control system shows an SIS
+      controller fault on one channel. Ops will want it back up fast."
+
+  - id: keyswitch_found
+    at: 15
+    from: Rosa Iqbal, Instrument Technician
+    via: call
+    subject: Keyswitch in PROGRAM
+    body: |
+      "I'm at the Unit 2 SIS cabinet. The keyswitch is in PROGRAM. It should
+      always be in RUN, and nobody had a permit for SIS work tonight. The key
+      is still in the switch."
+
+  - id: ops_pressure
+    at: 30
+    from: Mark Doyle, Operations Manager
+    via: call
+    subject: Restart by 04:00?
+    body: |
+      "Every hour Unit 2 is down costs us real money. If it's a nuisance trip,
+      reset it and restart by 04:00. Can you sign that off?"
+
+  - id: ews_beacon
+    at: 60
+    when: not ews_isolated
+    from: OT network monitor
+    via: alert
+    subject: EWS-2 talking to the DMZ jump host
+    body: |
+      EWS-2 opened a new connection to the jump host in the IT/OT DMZ and is
+      sending small packets every 30 seconds.
+    effects:
+      spread: 10
+
+actions:
+  - id: hold_restart
+    group: operations
+    label: Put Unit 2 on a formal hold, with no restart until the SIS is verified
+    takes: 5
+    result: The hold is written into the shift log and the control room board. Nobody restarts Unit 2 without your sign-off and the vendor's.
+    effects:
+      set: [restart_hold]
+
+  - id: keyswitch_run
+    group: operations
+    label: Turn the Unit 2 SIS keyswitch to RUN, remove the key and lock the cabinet
+    takes: 10
+    result: The keyswitch is in RUN, the key is in the shift supervisor's safe and the cabinet is locked.
+    effects:
+      set: [u2_key_run]
+
+  - id: isolate_ews
+    group: contain
+    label: Disconnect EWS-2 from the network but leave it powered on
+    takes: 5
+    result: EWS-2 is off the network with its memory intact.
+    effects:
+      set: [ews_isolated]
+      spread: -10
+
+  - id: investigate_ews
+    group: investigate
+    label: Check what ran on EWS-2 around the time of the trip
+    takes: 30
+    result: |
+      At 01:22 someone signed in to EWS-2 over remote desktop from the DMZ jump
+      host, using a controls engineer's account. At 01:40 an unknown program,
+      **logsync.exe**, started from a temp folder and talked to the Unit 2 SIS
+      controller using the vendor's programming protocol.
+    effects:
+      set: [ews_findings]
+
+  - id: image_ews
+    group: investigate
+    when: ews_isolated
+    label: Take a forensic image of EWS-2, memory first
+    takes: 45
+    result: Memory and disk images of EWS-2 are saved and hashed.
+    effects:
+      set: [ews_imaged]
+
+  - id: call_vendor
+    group: coordinate
+    label: Call the SIS vendor's emergency support line
+    takes: 15
+    result: The vendor's safety engineer joins remotely by phone and will be on site at 04:30 with their own laptop and tools.
+    effects:
+      set: [vendor_engaged]
+
+  - id: compare_logic
+    group: investigate
+    when: vendor_engaged
+    label: With the vendor, read the SIS controller memory and compare it with the offline master copy
+    takes: 1h
+    result: |
+      The controller memory holds code that is **not in the master copy**. It
+      looks like an attempt to change how the SIS responds to a high pressure
+      trip. The trip at 02:04 was probably the controller faulting when the
+      change went wrong.
+    effects:
+      set: [tamper_known]
+
+  - id: reload_logic
+    group: recover
+    when: tamper_known
+    label: Reload the verified logic from the offline master and run a full proof test
+    takes: 1h
+    result: The vendor reloads the master logic and proof tests every Unit 2 trip function. All pass.
+    effects:
+      set: [logic_restored]
+      safety: 10
+
+  - id: check_other_sis
+    group: investigate
+    label: Check the keyswitches and diagnostics on the Unit 1 SIS
+    takes: 20
+    result: The Unit 1 SIS keyswitch is **also in PROGRAM**. Its diagnostics look normal, but nobody should have touched it either.
+    effects:
+      set: [unit1_found]
+
+  - id: secure_unit1
+    group: operations
+    when: unit1_found
+    label: Turn the Unit 1 keyswitch to RUN, remove the key and lock the cabinet
+    takes: 10
+    result: Unit 1's keyswitch is in RUN and locked.
+    effects:
+      set: [unit1_secured]
+
+  - id: close_path
+    group: contain
+    when: ews_findings
+    label: Block remote desktop from the DMZ jump host into the control network and disable the engineer account used
+    takes: 15
+    result: Remote desktop from the DMZ into the control network is blocked, and the account is disabled until the engineer is reached.
+    effects:
+      set: [path_closed]
+      spread: -15
+
+  - id: wipe_ews
+    group: recover
+    label: Reimage EWS-2 so it's clean
+    takes: 1h
+    result: EWS-2 is rebuilt.
+    effects:
+      set: [ews_wiped]
+
+  - id: restart_unit
+    group: operations
+    label: Restart Unit 2
+    takes: 1h
+    result: Unit 2 is brought back online.
+    effects:
+      set: [restarted]
+      loss: -20
+
+  - id: notify_authority
+    group: communicate
+    label: Report to the national cyber authority and the process safety regulator
+    takes: 20
+    result: Both reports are filed. The national authority asks you to preserve everything and offers an analyst.
+    effects:
+      set: [authority_told]
+
+  - id: brief_ops
+    group: communicate
+    label: Brief the operations manager on why Unit 2 stays down and what a restart depends on
+    takes: 15
+    result: "Mark doesn't like it, but he agrees: no restart until the vendor has verified the logic."
+    effects:
+      set: [ops_briefed]
+
+  - id: close
+    group: coordinate
+    when: logic_restored
+    label: Hand over to the investigation team and close the response
+    takes: 10
+    result: You hand over to the investigation team.
+    effects:
+      end:
+        outcome: close
+        text: The SIS is verified and the investigation continues with the images.
+
+rules:
+  - id: forced_restart
+    when: time >= 120 and not restart_hold and not ops_briefed
+    effects:
+      set: [restarted]
+    text: At 04:10 the operations manager orders a reset and restart of Unit 2.
+
+  - id: unsafe_restart
+    when: restarted and not logic_restored
+    effects:
+      end:
+        outcome: fail
+        text: |
+          During startup, pressure in Unit 2 climbs past the trip point and the
+          SIS doesn't act. The relief valve lifts and the unit is shut down by
+          hand. Nobody is hurt, but it was close.
+
+  - id: unit1_fault
+    when: time >= 180 and not unit1_secured
+    effects:
+      safety: -20
+    text: The Unit 1 SIS reports a controller fault too.
+
+  - id: lost_evidence
+    when: ews_wiped and not ews_imaged
+    effects:
+      evidence: -50
+    text: EWS-2 was wiped without an image. The attacker's tools and traces are gone.
+
+  - id: down
+    when: not restarted
+    every: 1h
+    effects:
+      loss: 5
+
+  - id: path_open
+    when: not ews_isolated
+    every: 30
+    effects:
+      spread: 5
+
+objectives:
+  - text: Stop a restart before the SIS is proven
+    pass: restart_hold and at.hold_restart <= 60
+    weight: 3
+    hit: You put a formal hold on the restart early. A SIS you can't trust is worse than no production.
+    miss: Nobody formally stopped the restart. An unexplained trip with the keyswitch in PROGRAM must hold the unit down.
+
+  - text: Put every SIS back in a safe state
+    pass: u2_key_run and unit1_secured
+    weight: 2
+    hit: Both keyswitches are back in RUN and locked.
+    miss: At least one SIS keyswitch was left in PROGRAM.
+
+  - text: Find out what happened to the controller
+    pass: tamper_known
+    weight: 2
+    hit: The comparison with the master copy showed the logic had been tampered with.
+    miss: You never checked the controller memory against the master copy.
+
+  - text: Restore verified logic before any restart
+    pass: logic_restored and (not did.restart_unit or at.reload_logic < at.restart_unit)
+    weight: 3
+    hit: The logic was reloaded from the master and proof tested before any restart.
+    miss: The unit restarted, or stayed down, without verified safety logic.
+
+  - text: Close the path the attacker used
+    pass: ews_isolated and path_closed
+    weight: 2
+    hit: You isolated the EWS and closed the remote desktop route from the DMZ.
+    miss: The attacker's route into the control network stayed open.
+
+  - text: Keep the evidence
+    pass: ews_imaged and (not ews_wiped or at.image_ews < at.wipe_ews)
+    weight: 1
+    hit: EWS-2 was imaged, memory first, before anything else happened to it.
+    miss: The EWS was never imaged, or it was wiped first.
+
+  - text: Report it and keep operations on side
+    pass: authority_told and ops_briefed
+    weight: 1
+    hit: The authorities have their reports and operations understood the hold.
+    miss: The authorities or the operations manager were left out.
+
+solution:
+  - hold_restart
+  - isolate_ews
+  - keyswitch_run
+  - call_vendor
+  - brief_ops
+  - investigate_ews
+  - close_path
+  - check_other_sis
+  - secure_unit1
+  - image_ews
+  - compare_logic
+  - reload_logic
+  - notify_authority
+  - restart_unit
+  - close
+
+references:
+  - IEC 61511, functional safety of safety instrumented systems for the process industry
+  - NIST SP 800-82r3, Guide to Operational Technology (OT) Security
+  - CISA advisories on attacks against safety instrumented systems

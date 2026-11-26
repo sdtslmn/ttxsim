@@ -1,0 +1,314 @@
+id: bec-invoice
+title: The new bank details
+level: intermediate
+minutes: 20
+sector: Food distribution
+org: Pinewood Food Distribution (fictional)
+role: You lead IT and security, and Finance has just called you in.
+summary: Finance paid a supplier invoice to a fraudster's account on Friday. Recover the money, find out how they knew, and stop the next one.
+start: Mon 10:05
+limit: 8h
+pass: 70
+
+briefing: |
+  Pinewood Food Distribution moves chilled food to 900 shops and restaurants.
+  On Friday afternoon, Accounts Payable paid an invoice of **184,000** to a
+  packaging supplier, Dunmore Packaging, using new bank details that arrived
+  by email.
+
+  Money sent by mistake can sometimes be frozen at the receiving bank, but
+  every hour counts. The cyber insurance policy asks to be told about any
+  suspected fraud within 24 hours.
+
+meters:
+  funds:
+    label: Money still recoverable
+    start: 80
+    good: high
+  spread:
+    label: Attacker access
+    start: 45
+    good: low
+  trust:
+    label: Supplier trust
+    start: 75
+    good: high
+
+injects:
+  - id: dunmore_call
+    at: 0
+    from: Sean Brady, Dunmore Packaging
+    via: call
+    subject: Invoice 4471 is overdue
+    body: |
+      "Morning. I'm chasing invoice 4471 for 184,000. It's ten days overdue
+      now and my director is asking whether we should hold your next delivery."
+
+  - id: helen_chat
+    at: 10
+    from: Helen Park, Finance Manager
+    via: chat
+    subject: "Re: Dunmore"
+    body: |
+      We paid Dunmore on Friday at 16:30! Tom got an email from them in the
+      same thread as the invoice, saying they had moved banks. He updated the
+      details and I approved the payment. Please tell me this isn't what I
+      think it is.
+
+  - id: cfo_pressure
+    at: 60
+    from: Martin Cole, CFO
+    via: call
+    subject: Do we pay them again?
+    body: |
+      "Dunmore says no money, no packaging. If deliveries stop we can't run
+      the chilled lines. Do we just pay them again today? And what are we doing
+      to get the first payment back?"
+
+  - id: bank_needs_ref
+    when: did.call_bank and time >= at.call_bank + 30 and not police_report
+    from: Bank fraud team
+    via: email
+    subject: "Recall request: police reference needed"
+    body: |
+      We have contacted the receiving bank. To ask them to freeze and return
+      the funds we need a police or cybercrime report reference number. Please
+      send it as soon as you can.
+
+  - id: bank_result
+    when: did.call_bank and time >= at.call_bank + 90
+    from: Bank fraud team
+    via: email
+    subject: "Recall request: update from the receiving bank"
+    body:
+      - when: funds >= 60
+        text: |
+          Good news. The receiving bank has frozen **151,200** that was still in
+          the account. They expect to return it once the police reference is
+          confirmed. The rest was moved on Saturday.
+      - when: funds >= 30
+        text: |
+          The receiving bank has frozen **64,000**. Most of the money was moved
+          out over the weekend and this morning.
+      - text: |
+          The receiving bank found the account almost empty. They froze
+          **3,100**. The rest was moved on.
+
+  - id: second_attempt
+    at: 150
+    when: not tom_secured and not callback_rule
+    from: Tom Reyes, Accounts Payable
+    via: chat
+    subject: Another bank change?
+    body: |
+      Weird timing: Larkfield Dairy just emailed to say they've changed banks
+      too, replying to our last remittance. Should I update their details? It's
+      a 61,000 payment run on Wednesday.
+    effects:
+      set: [second_seen]
+      trust: -5
+
+actions:
+  - id: call_bank
+    group: contain
+    label: Call our bank's fraud team and ask for an urgent recall
+    takes: 15
+    result: The bank opens a recall case and contacts the receiving bank. They warn you that money in fraud accounts usually moves within days.
+    effects:
+      set: [recall_requested]
+
+  - id: police_report
+    group: coordinate
+    label: Report the fraud to the police cybercrime unit
+    takes: 30
+    result: You file the report online and get a reference number, which you send to the bank straight away.
+    effects:
+      set: [police_report]
+
+  - id: preserve
+    group: investigate
+    label: Export the fraudulent email with full headers and the mailbox audit logs
+    takes: 15
+    result: The email, its headers and the audit logs are saved and hashed. The bank, the police and the insurer will all want them.
+    effects:
+      set: [evidence_saved]
+
+  - id: inspect_email
+    group: investigate
+    label: Examine the bank change email and its sending domain
+    takes: 20
+    result: |
+      It came from **dunrnore-packaging.com**, with "rn" in place of "m". The
+      domain was registered 12 days ago. The email sits inside the real invoice
+      thread, with the whole history quoted. **The attacker had read your
+      thread**, so either Dunmore's mailbox or yours has been watched.
+    effects:
+      set: [email_inspected]
+
+  - id: check_tom_mailbox
+    group: investigate
+    label: Check Tom's mailbox for rules, forwarding and unusual sign-ins
+    takes: 20
+    result: |
+      Tom's mailbox has a rule, created three weeks ago, that copies any mail
+      mentioning "invoice" or "remittance" to an outside address. His sign-in
+      log shows regular sessions from a hosting provider abroad. The attacker
+      has been reading AP mail for weeks.
+    effects:
+      set: [tom_compromised_known]
+
+  - id: secure_tom
+    group: contain
+    when: did.check_tom_mailbox
+    label: Reset Tom's password, revoke his sessions and delete the rule
+    takes: 10
+    result: Tom's account is clean. The rule is gone and the attacker's sessions are dead.
+    effects:
+      set: [tom_secured]
+      spread: -35
+
+  - id: callback_rule
+    group: recover
+    label: Require a phone call to a known number before any bank detail change is accepted
+    takes: 20
+    result: Finance agrees. From today, bank detail changes need a call back to a number already on file, plus a second approver.
+    effects:
+      set: [callback_rule]
+
+  - id: notify_insurer
+    group: coordinate
+    label: Notify the cyber insurer
+    takes: 15
+    result: The insurer logs the claim and asks for the police reference and the saved email.
+    effects:
+      set: [insurer_notified]
+
+  - id: call_dunmore_it
+    group: communicate
+    label: Call Dunmore's IT team about the lookalike domain
+    takes: 15
+    result: Dunmore checks its own mail and finds nothing wrong on their side. They report the lookalike domain to the registrar and thank you for the call.
+    effects:
+      set: [dunmore_told]
+      trust: 10
+
+  - id: block_lookalike
+    group: contain
+    label: Block the lookalike domain on the mail gateway
+    takes: 5
+    result: Mail from dunrnore-packaging.com is now rejected.
+    effects:
+      set: [lookalike_blocked]
+
+  - id: brief_cfo
+    group: communicate
+    label: "Brief the CFO: what happened, the recall, and the options for paying Dunmore"
+    takes: 15
+    result: |
+      Martin decides to pay Dunmore's invoice to their verified account and
+      treat the lost money as a recovery case. Deliveries continue.
+    effects:
+      set: [cfo_briefed]
+      trust: 10
+
+  - id: reply_to_fraudster
+    group: communicate
+    label: Email the "new bank" contact and demand the money back
+    takes: 5
+    result: You get an automatic reply. Within the hour, the bank tells you the receiving account was emptied this morning.
+    effects:
+      funds: -30
+    lesson: |
+      Never contact the fraudster. It tells them they've been found, and they
+      move the money faster. Recovery goes through your bank and the police.
+
+  - id: close
+    group: coordinate
+    when: recall_requested
+    label: Write up the incident and close it
+    takes: 10
+    result: You write up the incident and hand the recovery case to Finance.
+    effects:
+      end:
+        outcome: close
+        text: You closed the incident and handed the recovery to Finance.
+
+rules:
+  - id: money_moves
+    when: not recall_requested
+    every: 30
+    effects:
+      funds: -10
+
+  - id: money_moves_slowly
+    when: recall_requested and not police_report
+    every: 30
+    effects:
+      funds: -5
+
+  - id: attacker_reading
+    when: not tom_secured
+    every: 1h
+    effects:
+      spread: 5
+
+objectives:
+  - text: Start the bank recall within the first hour
+    pass: recall_requested and at.call_bank <= 60
+    weight: 3
+    hit: You called the bank first. Nothing else you do today matters as much as that call.
+    miss: The bank recall started late or not at all. Fraud money moves fast, and the call to your bank comes before the investigation.
+
+  - text: Give the bank what it needs to act
+    pass: police_report and at.police_report <= at.call_bank + 120
+    weight: 2
+    hit: You got a police reference to the bank quickly, so the receiving bank could freeze the money.
+    miss: The bank needed a police reference and waited for it.
+
+  - text: Find out how the attacker knew about the invoice
+    pass: tom_compromised_known
+    weight: 2
+    hit: You found the forwarding rule in Tom's mailbox. The attacker was inside your own mail.
+    miss: You never worked out how the attacker joined a real thread. The answer was in your own AP mailbox.
+
+  - text: Lock the attacker out of your own mail
+    pass: tom_secured and at.secure_tom <= 180
+    weight: 2
+    hit: You shut the attacker out of Tom's mailbox before they could set up the next fraud.
+    miss: The attacker kept reading AP mail, ready for the next payment run.
+
+  - text: Stop the next fraud attempt
+    pass: callback_rule
+    weight: 2
+    hit: Bank changes now need a call back to a known number. That one rule stops most invoice fraud.
+    miss: Nothing stops the next fake bank change. A call back to a known number is the simplest fix.
+
+  - text: Keep the evidence and tell the insurer
+    pass: evidence_saved and insurer_notified
+    weight: 1
+    hit: You saved the evidence and notified the insurer inside the 24 hours.
+    miss: The insurer or the evidence was missed. Both matter for getting money back.
+
+  - text: Don't tip off the fraudster
+    pass: not did.reply_to_fraudster
+    weight: 1
+    hit: You left the fraudster alone and let the banks work.
+    miss: Contacting the fraudster made them empty the account.
+
+solution:
+  - call_bank
+  - preserve
+  - police_report
+  - check_tom_mailbox
+  - secure_tom
+  - inspect_email
+  - notify_insurer
+  - callback_rule
+  - call_dunmore_it
+  - block_lookalike
+  - brief_cfo
+  - close
+
+references:
+  - FBI IC3 and Europol guidance on business email compromise
+  - NIST SP 800-61r3 (April 2025), incident response as a CSF 2.0 profile

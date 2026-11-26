@@ -1,0 +1,317 @@
+id: vendor-access
+title: The vendor at 3 a.m.
+level: ot
+minutes: 25
+sector: Gas transmission
+org: Eastgate Gas Transmission (fictional)
+role: You are the OT security lead for the pipeline operator.
+summary: The compressor vendor's remote account connects to a station in the middle of the night. The vendor says it wasn't them. Shut the door, find what changed, and give maintenance a safe way back.
+start: Thu 03:20
+limit: 8h
+pass: 70
+
+briefing: |
+  Eastgate runs six gas compressor stations along a pipeline. Each station's
+  compressor is controlled by a unit control PLC supplied and maintained by
+  the manufacturer, **TurboTech**. TurboTech has an always-on VPN account
+  into the station networks so it can support the units remotely.
+
+  An OT network monitoring sensor watches traffic at every station. The
+  pipeline is controlled from a central gas control room.
+
+meters:
+  spread:
+    label: Attacker reach
+    start: 40
+    good: low
+  safety:
+    label: Process safety
+    start: 90
+    good: high
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+  impact:
+    label: Delivery disruption
+    start: 0
+    good: low
+
+injects:
+  - id: monitor_alert
+    at: 0
+    from: OT network monitor
+    via: alert
+    subject: Engineering session to CS-3 outside the maintenance window
+    body: |
+      A remote session through the VPN account **turbotech_support** reached
+      compressor station CS-3 at 03:02. The monitor saw engineering protocol
+      traffic to the unit control PLC, including parameter **read and write**
+      requests. No maintenance is scheduled.
+
+  - id: controller_call
+    at: 10
+    from: Samir Haddad, Gas Controller
+    via: call
+    subject: CS-3 looks normal
+    body: |
+      "CS-3 is running normally from here. Flows and pressures are steady and
+      I've had no alarms. Is something going on?"
+
+  - id: cs5_alert
+    at: 30
+    when: not vendor_disabled
+    from: OT network monitor
+    via: alert
+    subject: Same account now reaching CS-5
+    body: The turbotech_support session has started connecting to the unit control PLC at CS-5.
+    effects:
+      set: [cs5_touched]
+      spread: 15
+
+  - id: vendor_notice
+    at: 60
+    from: TurboTech Security
+    via: email
+    subject: Security notice to customers
+    body: |
+      We are investigating unauthorized access to our remote support
+      environment. Customer remote access credentials may be exposed. As a
+      precaution, please disable TurboTech remote access accounts until we
+      contact you.
+
+  - id: maintenance_ask
+    at: 120
+    from: Laila Noor, Maintenance Planner
+    via: email
+    subject: Tomorrow's CS-3 turbine work
+    body: |
+      TurboTech has an engineer booked for CS-3 turbine work tomorrow at 09:00.
+      They do part of it remotely. If their access is off, can we still go
+      ahead? Postponing means a second outage next month.
+
+actions:
+  - id: disable_vendor
+    group: contain
+    label: Disable the TurboTech VPN account and its always-on tunnel at the remote access gateway
+    takes: 5
+    result: The account and tunnel are disabled at every station.
+    effects:
+      set: [vendor_disabled]
+      spread: -15
+
+  - id: kill_session
+    group: contain
+    label: Terminate the active session
+    takes: 5
+    result: The session is cut.
+    effects:
+      set: [session_killed]
+      spread: -5
+
+  - id: station_watch
+    group: operations
+    label: Ask the gas controller to watch CS-3's surge margin closely and be ready to unload the unit
+    takes: 10
+    result: Samir sets tighter alarms on CS-3 and has the unload procedure ready.
+    effects:
+      set: [watching]
+      safety: 5
+
+  - id: call_vendor
+    group: coordinate
+    label: Call TurboTech's security contact on the number in the contract
+    takes: 15
+    result: TurboTech confirms none of their engineers connected tonight. Their support environment has been breached and they are notifying customers.
+    effects:
+      set: [vendor_called]
+
+  - id: preserve
+    group: investigate
+    label: Export the gateway and firewall logs and pull the packet capture from the OT monitor
+    takes: 20
+    result: Logs and the packet capture of the CS-3 session are saved and hashed.
+    effects:
+      set: [evidence_saved]
+
+  - id: review_logs
+    group: investigate
+    label: Review the remote access gateway logs for the TurboTech account
+    takes: 30
+    result: |
+      Tonight's session came from an address that isn't TurboTech's. The same
+      account logged in for a few minutes two nights ago at 02:10 and only read
+      data. That looks like reconnaissance before tonight.
+    effects:
+      set: [logs_reviewed]
+
+  - id: check_reach
+    group: investigate
+    label: Check which stations the TurboTech account can reach
+    takes: 30
+    result: The account can reach the unit control PLCs at all six stations. Nothing limits it to the station being worked on.
+    effects:
+      set: [scope_known]
+
+  - id: compare_cs3
+    group: investigate
+    label: Compare CS-3's unit control parameters with the last known-good backup
+    takes: 45
+    result: |
+      One parameter has changed: the **anti-surge control margin** was cut from
+      10% to 2%. The compressor still runs, but it would now get much closer to
+      surge before the controller reacts.
+    effects:
+      set: [cs3_change_found]
+
+  - id: restore_cs3
+    group: recover
+    when: cs3_change_found
+    label: Restore the known-good parameters on CS-3 with the station engineer, under change control
+    takes: 45
+    result: The anti-surge margin is back to 10% and checked against the backup. The station engineer signs it off.
+    effects:
+      set: [cs3_restored]
+      safety: 10
+
+  - id: check_cs5
+    group: investigate
+    when: cs5_touched
+    label: Compare CS-5's unit control parameters with its backup
+    takes: 30
+    result: CS-5's parameters match the backup. The session only read data there.
+    effects:
+      set: [cs5_checked]
+
+  - id: supervised_access
+    group: recover
+    when: vendor_disabled
+    label: Give TurboTech a new access route with per-session approval, MFA and recording
+    takes: 1h
+    result: TurboTech gets named accounts with MFA. Each session must be approved by the control room and is recorded. Tomorrow's work can go ahead under supervision.
+    effects:
+      set: [supervised_access]
+
+  - id: reenable_vendor
+    group: contain
+    when: vendor_disabled and seen.maintenance_ask
+    label: Re-enable the old TurboTech account so tomorrow's maintenance can go ahead
+    takes: 5
+    result: The old account is live again. Within the hour, the monitor shows a login from the same unknown address.
+    effects:
+      set: [reenabled]
+      spread: 20
+    lesson: |
+      The old account's credentials are in the attacker's hands. Maintenance
+      needs a new, supervised route, not the old door reopened.
+
+  - id: notify_authority
+    group: communicate
+    label: Report the incident to the national cyber authority and the energy regulator
+    takes: 20
+    result: The reports are filed. The authority asks whether other operators use TurboTech and plans a sector alert.
+    effects:
+      set: [authority_told]
+
+  - id: brief_management
+    group: communicate
+    label: Brief the operations director
+    takes: 15
+    result: The director backs the decisions and asks for an update at 08:00.
+    effects:
+      set: [mgmt_briefed]
+
+  - id: close
+    group: coordinate
+    when: vendor_disabled
+    label: Hand over to the day team and close the night response
+    takes: 10
+    result: You hand over to the day team.
+    effects:
+      end:
+        outcome: close
+        text: You handed over to the day team.
+
+rules:
+  - id: open_door
+    when: not vendor_disabled
+    every: 15
+    effects:
+      spread: 5
+
+  - id: surge_watched
+    when: time >= 300 and not cs3_restored and watching
+    effects:
+      safety: -15
+      impact: 15
+    text: At 08:20 the CS-3 compressor approaches surge during a flow change. The gas controller unloads it in time and gas deliveries are cut back for two hours.
+
+  - id: surge_unwatched
+    when: time >= 300 and not cs3_restored and not watching
+    effects:
+      end:
+        outcome: fail
+        text: At 08:20 the CS-3 compressor surges during a flow change. The unit trips hard, damaging the compressor, and deliveries to two industrial customers stop.
+
+objectives:
+  - text: Shut the vendor path within 15 minutes
+    pass: vendor_disabled and at.disable_vendor <= 15
+    weight: 3
+    hit: You disabled the account and tunnel at once, not just the session.
+    miss: The vendor path stayed open too long. Killing one session isn't enough while the account still works.
+
+  - text: Confirm with the vendor through a channel you trust
+    pass: vendor_called
+    weight: 1
+    hit: You called TurboTech on the number in the contract and confirmed it wasn't them.
+    miss: You never confirmed with TurboTech directly.
+
+  - text: Find and undo what the attacker changed
+    pass: cs3_restored
+    weight: 3
+    hit: You found the changed anti-surge margin and restored it before it could hurt anyone.
+    miss: The anti-surge change on CS-3 was never found or fixed.
+
+  - text: Know how far the account reached
+    pass: scope_known and logs_reviewed and (not cs5_touched or cs5_checked)
+    weight: 2
+    hit: You checked the logs, the stations the account could reach and any station it touched.
+    miss: You didn't establish where else the account had been.
+
+  - text: Keep the evidence
+    pass: evidence_saved
+    weight: 1
+    hit: The logs and packet capture are preserved.
+    miss: The logs and packet capture were never saved.
+
+  - text: Give maintenance a safe way back in
+    pass: supervised_access and not reenabled
+    weight: 2
+    hit: TurboTech has a supervised, recorded route, and the compromised account stays dead.
+    miss: Maintenance either has no way in or uses the compromised account.
+
+  - text: Report and brief
+    pass: authority_told and mgmt_briefed
+    weight: 1
+    hit: The authorities and the director are informed.
+    miss: The authorities or the director were left out.
+
+solution:
+  - disable_vendor
+  - kill_session
+  - station_watch
+  - call_vendor
+  - preserve
+  - review_logs
+  - check_reach
+  - compare_cs3
+  - restore_cs3
+  - supervised_access
+  - notify_authority
+  - brief_management
+  - close
+
+references:
+  - CISA guidance on securing remote access to OT and on third-party risk
+  - ISA/IEC 62443-2-4, security program requirements for IACS service providers
+  - NIST SP 800-82r3, Guide to Operational Technology (OT) Security

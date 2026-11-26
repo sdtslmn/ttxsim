@@ -1,0 +1,32 @@
+{
+  "name": "ttxsim",
+  "version": "0.1.0",
+  "description": "An incident response tabletop exercise simulator for the browser and the terminal.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ttxsim": "dist/src/cli/index.js"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "embed": "node scripts/embed-scenarios.mjs",
+    "build": "npm run embed && tsc -p tsconfig.json",
+    "sim": "npm run build --silent && node dist/src/cli/index.js",
+    "validate-scenarios": "npm run build --silent && node dist/src/cli/index.js validate",
+    "test": "npm run build --silent && node --test dist/test/*.test.js",
+    "dev:web": "npm run embed && vite --config web/vite.config.ts",
+    "build:web": "npm run embed && vite build --config web/vite.config.ts",
+    "preview:web": "vite preview --config web/vite.config.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.8"
+  }
+}

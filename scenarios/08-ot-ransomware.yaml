@@ -1,0 +1,427 @@
+id: ot-ransomware
+title: Black screens in the control room
+level: ot
+minutes: 25
+sector: Food and beverage manufacturing
+org: Delta Crest Beverages (fictional)
+role: You are the OT security lead for the plant, called in early on a Saturday.
+summary: Office ransomware has crossed into the bottling plant and the operator screens are going dark. Keep the process safe, cut the path, and recover cleanly.
+start: Sat 06:10
+limit: 8h
+pass: 70
+
+briefing: |
+  Delta Crest Beverages runs a bottling plant with two filling lines, a
+  clean-in-place (CIP) system that doses caustic for cleaning, and a steam
+  boiler. PLCs control the lines. Operators watch and steer them through HMI
+  computers in the control room. An engineering workstation (EWS) holds the
+  PLC programming tools.
+
+  The plant network sits behind a firewall from the office network, but some
+  plant computers are still members of the office Windows domain. Safety
+  interlocks on the CIP skid and the boiler's burner management system are
+  hardwired and do not depend on the HMIs.
+
+  A clean "golden image" of each HMI and the EWS is kept offline in the plant
+  manager's safe.
+
+meters:
+  safety:
+    label: Process safety
+    start: 90
+    good: high
+  loss:
+    label: Production loss
+    start: 10
+    good: low
+  spread:
+    label: Attacker reach in OT
+    start: 30
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+
+injects:
+  - id: kofi_call
+    at: 0
+    from: Kofi Mensah, Shift Supervisor
+    via: call
+    subject: Ransom screens on Line 2
+    body: |
+      "Two of the Line 2 HMIs just turned red with a ransom message. Line 2 is
+      still filling, the PLCs seem fine, but we can't see or change anything
+      from those screens. Line 1's HMI still works. What do you want us to do?"
+
+  - id: it_call
+    at: 5
+    from: Jonas Weber, IT On-call
+    via: call
+    subject: Office is down
+    body: |
+      "Heads up: ransomware hit the office domain overnight, from about 04:30.
+      File servers and email are encrypted. We're isolating servers now. I
+      didn't think it could reach the plant."
+
+  - id: historian_hit
+    at: 15
+    when: not it_ot_cut
+    from: Historian server
+    via: alert
+    subject: Historian service stopped
+    body: The plant historian stopped recording. Its data folder is full of encrypted files.
+    effects:
+      set: [historian_lost]
+      spread: 10
+
+  - id: hmi1_hit
+    at: 30
+    when: not it_ot_cut
+    from: Kofi Mensah, Shift Supervisor
+    via: call
+    subject: Line 1 screen gone too
+    body: |
+      "Line 1's HMI just went red as well. We're blind on both lines now. I've
+      got people looking at the gauges, but this isn't how we run."
+    effects:
+      set: [hmi1_lost]
+      spread: 15
+      safety: -10
+
+  - id: ews_hit
+    at: 40
+    when: not it_ot_cut
+    from: Rosa Lima, Controls Engineer
+    via: chat
+    subject: EWS is encrypted
+    body: |
+      The engineering workstation is showing the ransom note. That's the
+      machine with the PLC programming software and the project files.
+    effects:
+      set: [ews_lost]
+      spread: 15
+
+  - id: production_push
+    at: 60
+    from: Paul Grant, Production Manager
+    via: call
+    subject: The retailer order
+    body: |
+      "We have the big retailer order shipping Monday. Every hour of lost
+      filling hurts. How fast can you get the lines back to normal?"
+
+  - id: vendor_offer
+    at: 90
+    from: FillTech Support
+    via: email
+    subject: We can help restore your HMIs now
+    body: |
+      We heard about your incident from your controls team. Our engineer can
+      connect through our usual remote VPN right now and help reinstall the
+      HMI software. Just enable our account and we'll get started.
+
+actions:
+  - id: cut_it_ot
+    group: contain
+    label: Block all traffic between the office network and the plant at the firewall
+    takes: 5
+    result: The firewall now drops everything between IT and OT. The plant is an island. Office-based reporting stops, which is fine for today.
+    effects:
+      set: [it_ot_cut]
+      spread: -10
+
+  - id: manual_ops
+    group: operations
+    label: Run the lines from local panels, with extra operators watching gauges on the floor
+    takes: 15
+    result: Operators move to the local panels and walk the lines every 15 minutes. Filling continues at a slower rate.
+    effects:
+      set: [manual_ops]
+      safety: 10
+
+  - id: shutdown
+    group: operations
+    label: Run a controlled shutdown of both lines
+    takes: 30
+    result: Both lines are brought down in sequence and left in a safe state. Nothing is filling.
+    effects:
+      set: [shutdown]
+      safety: 10
+      loss: 20
+
+  - id: check_safety
+    group: operations
+    label: Have the instrument technician confirm the CIP interlocks and the boiler burner management are healthy and independent
+    takes: 20
+    result: The technician confirms both safety systems are hardwired, healthy and unaffected by the HMIs. They will still trip the process if needed.
+    effects:
+      set: [safety_checked]
+      safety: 5
+
+  - id: isolate_hmis
+    group: contain
+    label: Unplug the infected HMIs from the plant network
+    takes: 10
+    result: The infected HMIs are disconnected but left powered on.
+    effects:
+      set: [hmis_isolated]
+      spread: -10
+
+  - id: identify_path
+    group: investigate
+    label: Find out how the ransomware reached the plant network
+    takes: 30
+    result: |
+      The HMIs are members of the office domain. The attacker used a stolen
+      domain admin account to push the ransomware through the domain to every
+      member, including the plant machines. The firewall allowed domain
+      traffic so the HMIs could reach the office domain controllers.
+    effects:
+      set: [path_found]
+
+  - id: remove_domain
+    group: contain
+    when: path_found
+    label: Take the plant machines off the office domain and use local plant accounts
+    takes: 30
+    result: The plant computers now use local accounts managed by the controls team. A stolen office account no longer works in the plant.
+    effects:
+      set: [domain_removed]
+      spread: -10
+
+  - id: image_hmis
+    group: investigate
+    when: hmis_isolated
+    label: Image the infected HMIs before rebuilding them
+    takes: 30
+    result: Disk images of the infected HMIs are saved for the investigators.
+    effects:
+      set: [hmis_imaged]
+
+  - id: verify_logic
+    group: investigate
+    when: not ews_lost or ews_rebuilt
+    label: Compare the running PLC programs with the offline backups
+    takes: 30
+    result: Every PLC program matches its offline backup. The attacker never touched the controllers. This was a Windows problem, not a control problem.
+    effects:
+      set: [logic_verified]
+
+  - id: rebuild_ews
+    group: recover
+    when: ews_lost and it_ot_cut
+    label: Rebuild the engineering workstation from its golden image
+    takes: 90
+    result: The EWS is rebuilt from the offline image and its project files restored from the offline backup.
+    effects:
+      set: [ews_rebuilt]
+
+  - id: restore_hmis
+    group: recover
+    when: it_ot_cut and hmis_isolated
+    label: Rebuild the HMIs from the offline golden images
+    takes: 2h
+    result: The HMIs are rebuilt from the golden images and reconnected.
+    effects:
+      set: [restore_done]
+
+  - id: restore_again
+    group: recover
+    when: reinfected and domain_removed
+    label: Rebuild the HMIs again, now with local plant accounts
+    takes: 2h
+    result: The HMIs come back on local accounts and stay clean.
+    effects:
+      set: [restored]
+      loss: -10
+
+  - id: vendor_vpn
+    group: coordinate
+    when: seen.vendor_offer
+    label: Enable FillTech's VPN account so they can help right away
+    takes: 5
+    result: FillTech connects. Twenty minutes later the firewall shows the same VPN account scanning the plant network from an address FillTech doesn't recognise.
+    effects:
+      set: [vendor_connected]
+      spread: 15
+    lesson: |
+      During an active incident, every way in is a risk, especially a vendor
+      path you haven't checked. Ask the vendor to come on site, or open a
+      supervised session once the environment is clean.
+
+  - id: vendor_onsite
+    group: coordinate
+    when: seen.vendor_offer
+    label: Ask FillTech to send an engineer on site instead
+    takes: 15
+    result: FillTech will have an engineer at the plant by noon. They bring their own clean installation media.
+    effects:
+      set: [vendor_onsite]
+
+  - id: reboot_plcs
+    group: operations
+    label: Restart the PLCs to be safe
+    takes: 10
+    result: Both lines trip. Line 2 loses a batch of product mid-fill, and restarting takes over an hour.
+    effects:
+      loss: 20
+      safety: -15
+    lesson: |
+      The PLCs were never infected. Restarting them caused a trip and an upset
+      for nothing. Check the controllers by comparing their programs with
+      offline backups, not by power cycling them.
+
+  - id: notify_authority
+    group: communicate
+    label: Report the incident to the national cyber authority, as required for the sector
+    takes: 20
+    result: The report is filed with a reference number. They ask for an update within 72 hours.
+    effects:
+      set: [authority_notified]
+
+  - id: brief_management
+    group: communicate
+    label: Brief the plant manager and production on the plan and realistic timings
+    takes: 15
+    result: Management accepts manual running today and a full restore by the afternoon. Paul moves the retailer pickup to Monday afternoon.
+    effects:
+      set: [mgmt_briefed]
+
+  - id: close
+    group: coordinate
+    when: restored
+    label: Return the plant to normal operation and close the incident
+    takes: 10
+    result: Both lines are back on their HMIs and the incident is closed.
+    effects:
+      end:
+        outcome: close
+        text: The plant is back on its operator screens. The office recovery carries on separately.
+
+rules:
+  - id: reinfection
+    when: restore_done and not domain_removed
+    effects:
+      set: [reinfected]
+      loss: 10
+    text: The rebuilt HMIs rejoin the office domain and are encrypted again within minutes.
+
+  - id: clean_restore
+    when: restore_done and not reinfected
+    effects:
+      set: [restored]
+      loss: -10
+
+  - id: blind_operation
+    when: hmi1_lost and not manual_ops and not shutdown
+    effects:
+      safety: -20
+    text: Operators can't see Line 1's tank levels or CIP status, and nobody has told them how to run without screens.
+
+  - id: unsafe
+    when: safety <= 30
+    effects:
+      end:
+        outcome: fail
+        text: A CIP tank overfills while the operators are blind and caustic spills in the cleaning area. The plant is evacuated and shut down for the weekend.
+
+  - id: path_open
+    when: not it_ot_cut
+    every: 15
+    effects:
+      spread: 5
+
+  - id: running_slow
+    when: manual_ops and not shutdown and not restored
+    every: 1h
+    effects:
+      loss: 2
+
+  - id: stopped
+    when: shutdown and not restored
+    every: 1h
+    effects:
+      loss: 5
+
+  - id: stumbling
+    when: not manual_ops and not shutdown and not restored
+    every: 1h
+    effects:
+      loss: 5
+      safety: -10
+
+  - id: evidence_gone
+    when: restore_done and not hmis_imaged
+    effects:
+      evidence: -50
+    text: The infected HMIs were wiped without being imaged.
+
+objectives:
+  - text: Cut the path between IT and OT within 15 minutes
+    pass: it_ot_cut and at.cut_it_ot <= 15
+    weight: 3
+    hit: You cut the IT to OT connection in minutes, before the historian, the Line 1 HMI and the EWS were hit.
+    miss: The connection between IT and OT stayed open, and the ransomware kept reaching plant machines.
+
+  - text: Keep the process safe while the screens are down
+    pass: (manual_ops or shutdown) and safety_checked
+    weight: 3
+    hit: You moved to a safe operating mode and confirmed the safety systems were healthy and independent.
+    miss: The plant ran without a clear safe operating mode, or nobody confirmed the safety systems.
+
+  - text: Don't make it worse
+    pass: not did.reboot_plcs and not vendor_connected
+    weight: 2
+    hit: You left the healthy PLCs alone and kept the vendor path closed during the incident.
+    miss: Restarting PLCs or opening the vendor VPN made things worse.
+
+  - text: Prove the controllers weren't touched
+    pass: logic_verified
+    weight: 2
+    hit: You compared the PLC programs with offline backups, so you know the control logic is genuine.
+    miss: You never confirmed that the PLC programs were unchanged.
+
+  - text: Find and close the path the attacker used
+    pass: path_found and domain_removed
+    weight: 2
+    hit: You found the domain trust and removed it.
+    miss: The plant is still on the office domain, so the next stolen admin account reaches it too.
+
+  - text: Restore operator screens cleanly
+    pass: restored and not reinfected
+    weight: 2
+    hit: The HMIs came back from golden images and stayed clean.
+    miss: The restore didn't happen, or the HMIs were encrypted again because they rejoined the domain.
+
+  - text: Keep evidence
+    pass: hmis_imaged
+    weight: 1
+    hit: The infected HMIs were imaged first.
+    miss: The infected HMIs were never imaged.
+
+  - text: Report and keep management informed
+    pass: authority_notified and mgmt_briefed
+    weight: 1
+    hit: The authority has its report and management knows the plan.
+    miss: The authority or management was left out.
+
+solution:
+  - cut_it_ot
+  - manual_ops
+  - check_safety
+  - isolate_hmis
+  - brief_management
+  - identify_path
+  - vendor_onsite
+  - remove_domain
+  - image_hmis
+  - verify_logic
+  - restore_hmis
+  - notify_authority
+  - close
+
+references:
+  - NIST SP 800-82r3, Guide to Operational Technology (OT) Security
+  - ISA/IEC 62443-3-2 and 62443-3-3 on zones, conduits and system security requirements
+  - CISA, #StopRansomware Guide

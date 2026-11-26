@@ -1,0 +1,282 @@
+id: insider-exit
+title: The resignation
+level: intermediate
+minutes: 20
+sector: Manufacturing technology
+org: Corvid Robotics (fictional)
+role: You are the security manager.
+summary: A senior engineer who is leaving for a competitor uploads gigabytes of design files to personal storage. Act fast, but by the book.
+start: Wed 10:20
+limit: 8h
+pass: 70
+
+briefing: |
+  Corvid Robotics designs robotic arms for warehouses. **Dan Marsh**, a senior
+  mechanical engineer, resigned last week and has accepted a job at a
+  competitor. His last day is Friday.
+
+  Company policy allows security monitoring of company devices and accounts.
+  It does not allow access to employees' personal accounts. HR and Legal must
+  be involved in any investigation of a named employee.
+
+meters:
+  exposure:
+    label: Design data at risk
+    start: 50
+    good: low
+  evidence:
+    label: Evidence quality
+    start: 60
+    good: high
+  legal:
+    label: Legal risk to the company
+    start: 20
+    good: low
+
+injects:
+  - id: dlp_alert
+    at: 0
+    from: Data loss prevention
+    via: alert
+    subject: "Large upload to personal cloud storage: d.marsh"
+    body: |
+      Between 08:15 and 09:50, **6.2 GB** (1,140 files) from
+      `/projects/arm-gen3/` were uploaded from laptop LT-0442 to a personal
+      cloud storage account. User: d.marsh. Policy: monitor only.
+
+  - id: manager_chat
+    at: 20
+    from: Riya Shah, Engineering Manager
+    via: chat
+    subject: About Dan
+    body: |
+      You asked about Dan. He resigned last week and is joining a competitor.
+      On Monday he asked me for access to the old Gen2 repos too, "for handover
+      notes". I said yes. Should I not have?
+
+  - id: second_upload
+    at: 60
+    when: not access_limited
+    from: Data loss prevention
+    via: alert
+    subject: "Another upload: d.marsh"
+    body: Another **3.8 GB** from the Gen2 repositories just went to the same personal account.
+    effects:
+      exposure: 20
+
+  - id: hr_question
+    at: 90
+    from: Claire Dupont, HR Business Partner
+    via: chat
+    subject: Can we just walk him out?
+    body: |
+      Riya told me. Can we just walk Dan out today and take his laptop? I want
+      to do this properly, but I also don't want him taking more.
+
+actions:
+  - id: verify_alert
+    group: investigate
+    label: Review the DLP alert details and confirm what was uploaded
+    takes: 15
+    result: |
+      The files are current Gen3 design drawings and the bill of materials,
+      marked confidential. The destination is a personal account in Dan's own
+      name, signed in from LT-0442 while Dan was badged into the office.
+    effects:
+      set: [verified]
+
+  - id: involve_hr_legal
+    group: coordinate
+    label: Bring in HR and Legal and agree how to handle it
+    takes: 15
+    result: |
+      Claire and the company lawyer agree on a plan: preserve evidence first,
+      limit access quietly, then hold a formal exit meeting with both of them
+      present.
+    effects:
+      set: [hr_legal]
+      legal: -10
+
+  - id: limit_access
+    group: contain
+    when: verified
+    label: Quietly remove Dan's access to sensitive repos and block personal cloud uploads from his laptop
+    takes: 10
+    result: Dan keeps his email and handover documents but loses the design repos. Uploads to personal storage from LT-0442 are blocked.
+    effects:
+      set: [access_limited]
+      exposure: -10
+
+  - id: preserve_logs
+    group: investigate
+    label: Export and hash the DLP, proxy and repository logs, with a chain of custody record
+    takes: 30
+    result: The logs are exported, hashed and signed for. They will stand up if this goes to court.
+    effects:
+      set: [logs_preserved]
+      evidence: 20
+
+  - id: check_others
+    group: investigate
+    label: Check who else downloaded the same projects in the last month
+    takes: 30
+    result: Only the usual team members, with normal patterns. This looks like one person.
+    effects:
+      set: [others_checked]
+
+  - id: confront_now
+    group: communicate
+    label: Call Dan and ask him to explain the uploads
+    takes: 10
+    result: Dan says it was "just for his portfolio" and ends the call quickly.
+    effects:
+      set: [confronted]
+
+  - id: read_personal
+    group: investigate
+    label: Sign in to Dan's personal cloud account with the password saved in his browser
+    takes: 20
+    result: You can see the files. You can also see his family photos and tax returns.
+    effects:
+      set: [accessed_personal]
+      legal: 40
+    lesson: |
+      Accessing someone's personal account without authority is likely illegal
+      and makes the evidence unusable. It also hands Dan's lawyer an easy
+      counterclaim. Recovery of files goes through Legal.
+
+  - id: exit_meeting
+    group: coordinate
+    when: hr_legal and logs_preserved
+    label: Hold the exit meeting with HR and Legal, collect the laptop and badge, and ask for the files back
+    takes: 45
+    result: |
+      Faced with the logs, Dan admits the uploads. He hands over the laptop and
+      badge, and agrees in writing to delete the files and let an independent
+      examiner confirm it.
+    effects:
+      set: [meeting_done, laptop_collected]
+      exposure: -20
+
+  - id: disable_all
+    group: contain
+    when: meeting_done or confronted
+    label: Disable all of Dan's accounts and access
+    takes: 10
+    result: Every account, token and badge for Dan is disabled.
+    effects:
+      set: [disabled]
+
+  - id: image_laptop
+    group: investigate
+    when: laptop_collected
+    label: Make a forensic image of laptop LT-0442
+    takes: 1h
+    result: The laptop is imaged and stored with the logs.
+    effects:
+      set: [laptop_imaged]
+      evidence: 10
+
+  - id: legal_letter
+    group: communicate
+    when: meeting_done
+    label: Have Legal send a formal letter requiring deletion and a signed certificate
+    takes: 30
+    result: The letter goes to Dan and, as agreed with Legal, a separate notice to his new employer.
+    effects:
+      set: [letter_sent]
+      exposure: -15
+
+  - id: block_company_wide
+    group: recover
+    label: Block uploads to personal cloud storage for everyone on company devices
+    takes: 20
+    result: Uploads to personal storage are now blocked company-wide, with an exception process.
+    effects:
+      set: [org_blocked]
+
+  - id: close
+    group: coordinate
+    when: meeting_done
+    label: Write up the case and hand it to Legal
+    takes: 10
+    result: You hand the case file to Legal.
+    effects:
+      end:
+        outcome: close
+        text: You handed the case to Legal.
+
+rules:
+  - id: tipped_off
+    when: confronted and not (hr_legal and logs_preserved)
+    effects:
+      set: [tipped_off]
+      evidence: -30
+      legal: 20
+    text: That evening Dan logs in from home and deletes the synced folders on his laptop. A lawyer's letter follows.
+
+  - id: still_uploading
+    when: not access_limited
+    every: 1h
+    effects:
+      exposure: 5
+
+objectives:
+  - text: Confirm what the alert shows before acting on it
+    pass: verified
+    weight: 1
+    hit: You checked what was uploaded and where before doing anything else.
+    miss: You never confirmed the details of the alert.
+
+  - text: Bring in HR and Legal early
+    pass: hr_legal and at.involve_hr_legal <= 60
+    weight: 2
+    hit: HR and Legal were involved within the hour, as the policy requires.
+    miss: An investigation of a named employee without HR and Legal is a risk to the company and to the case.
+
+  - text: Preserve evidence that will stand up
+    pass: logs_preserved and laptop_imaged
+    weight: 2
+    hit: Logs and the laptop image are preserved with a chain of custody.
+    miss: The logs or the laptop image are missing.
+
+  - text: Stop more data leaving, fast
+    pass: access_limited and at.limit_access <= 60
+    weight: 2
+    hit: You limited Dan's access quietly before the second upload.
+    miss: Dan kept uploading because his access stayed open.
+
+  - text: Handle the exit by the book
+    pass: meeting_done and disabled and letter_sent
+    weight: 2
+    hit: A formal meeting, full account shutdown and a legal letter. That's how files actually come back.
+    miss: The exit was incomplete. The meeting, the shutdown or the letter is missing.
+
+  - text: Don't tip him off before you're ready
+    pass: not tipped_off
+    weight: 2
+    hit: Dan only found out once the evidence was safe and HR and Legal were in the room.
+    miss: Confronting Dan early let him destroy evidence.
+
+  - text: Stay within the law and policy
+    pass: not accessed_personal
+    weight: 2
+    hit: You kept to company systems and let Legal handle his personal account.
+    miss: Signing in to his personal account broke policy and probably the law.
+
+solution:
+  - verify_alert
+  - limit_access
+  - involve_hr_legal
+  - preserve_logs
+  - check_others
+  - exit_meeting
+  - disable_all
+  - image_laptop
+  - legal_letter
+  - block_company_wide
+  - close
+
+references:
+  - CISA Insider Threat Mitigation Guide
+  - NIST SP 800-61r3 (April 2025), incident response as a CSF 2.0 profile

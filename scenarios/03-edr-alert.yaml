@@ -1,0 +1,341 @@
+id: edr-alert
+title: One red alert
+level: beginner
+minutes: 20
+sector: Professional services
+org: Granite Ridge Architects (fictional)
+role: You are the only security analyst at a 120-person firm.
+summary: The endpoint tool flags PowerShell launched from a Word document. Contain it, keep the evidence and find out how far it got.
+start: Thu 14:05
+limit: 6h
+pass: 70
+
+briefing: |
+  Granite Ridge Architects has 120 staff in one office. Every PC runs an
+  endpoint detection and response (EDR) agent. The agent can cut a PC off the
+  network while keeping its own connection open, and it can collect memory and
+  files for you remotely.
+
+  You are the only security analyst. An alert has just come in.
+
+meters:
+  spread:
+    label: Attacker reach
+    start: 15
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+  impact:
+    label: Business disruption
+    start: 5
+    good: low
+
+injects:
+  - id: edr_alert
+    at: 0
+    from: EDR console
+    via: alert
+    subject: "High: suspicious PowerShell on RECEPTION-PC2"
+    body: |
+      **WINWORD.EXE** started **powershell.exe** with an encoded command on
+      RECEPTION-PC2 (user m.lopez). PowerShell then connected to
+      `cdn-update-live.net` and wrote a file to the user's AppData folder.
+
+      Severity: high. No automatic response is configured.
+
+  - id: maria_call
+    at: 10
+    from: Maria Lopez, Reception
+    via: call
+    subject: My computer is acting up
+    body: |
+      "Hi, my PC has gone really slow. Earlier I opened an invoice from a
+      supplier and it asked me to enable content, so I did, but the document
+      was blank. Should I restart it?"
+
+  - id: smb_scan
+    at: 30
+    when: not host_isolated
+    from: EDR console
+    via: alert
+    subject: "High: network scanning from RECEPTION-PC2"
+    body: |
+      RECEPTION-PC2 is connecting to file sharing ports (SMB) across the whole
+      office subnet, one address after another.
+    effects:
+      set: [scanning]
+      spread: 15
+
+  - id: intel_note
+    at: 45
+    from: Threat intelligence feed
+    via: email
+    subject: "Indicator match: cdn-update-live.net"
+    body: |
+      The domain is linked to a well-known malware loader. Groups using it
+      often hand access to ransomware operators within **four to eight hours**
+      of the first infection.
+
+  - id: manager_ask
+    at: 60
+    from: Tom Becker, Office Manager
+    via: chat
+    subject: Reception PC
+    body: |
+      Reception can't check visitors in. We have clients arriving all
+      afternoon. How long until Maria has a working computer?
+
+  - id: second_host
+    at: 75
+    when: not host_isolated
+    from: EDR console
+    via: alert
+    subject: "High: same activity on DESIGN-WS07"
+    body: |
+      DESIGN-WS07 just ran the same encoded PowerShell command. It was started
+      remotely over an admin share from RECEPTION-PC2.
+    effects:
+      set: [ws07_infected]
+      spread: 20
+
+actions:
+  - id: review_alert
+    group: investigate
+    label: Open the alert and review the process tree
+    takes: 10
+    result: |
+      Outlook saved **Invoice_7781.docm**, Word opened it, a macro started
+      PowerShell, PowerShell downloaded a payload and created a scheduled task
+      called "OneDriveSync" so it survives a restart. This is a real infection,
+      not a false positive.
+    effects:
+      set: [alert_reviewed]
+
+  - id: isolate_host
+    group: contain
+    when: not host_isolated
+    label: Isolate RECEPTION-PC2 from the network with the EDR agent
+    takes: 5
+    result: The PC can now talk only to the EDR console. Whatever is running on it can't reach the rest of the office or the internet.
+    effects:
+      set: [host_isolated]
+      spread: -10
+
+  - id: pull_power
+    group: contain
+    when: not host_isolated
+    label: Tell Maria to switch the PC off at the wall
+    takes: 2
+    result: The PC goes dark. Nothing on it is running any more, and nothing that was in memory survives either.
+    effects:
+      set: [host_isolated, powered_off]
+      spread: -10
+      evidence: -40
+    lesson: |
+      Switching off stops the attack, but it destroys memory, which often holds
+      the decoded payload, network connections and keys. Network isolation
+      through the EDR agent stops the attack and keeps that evidence.
+
+  - id: collect_triage
+    group: investigate
+    when: not powered_off and not did.reimage
+    label: Collect memory and a triage package through the EDR agent
+    takes: 30
+    result: You have a memory image, the payload, the scheduled task and the browser history, all hashed and stored.
+    effects:
+      set: [triage_collected]
+
+  - id: search_ioc
+    group: investigate
+    label: Search every PC and the proxy logs for the domain, file hash and scheduled task
+    takes: 20
+    result:
+      - when: ws07_infected
+        text: |
+          **DESIGN-WS07** has the same scheduled task and has contacted the
+          domain. Nothing else matches.
+      - text: Only RECEPTION-PC2 matches. Nothing has spread.
+    effects:
+      set: [scoped]
+
+  - id: isolate_ws07
+    group: contain
+    when: did.search_ioc and ws07_infected
+    label: Isolate DESIGN-WS07 too
+    takes: 5
+    result: DESIGN-WS07 is cut off from the network.
+    effects:
+      set: [ws07_isolated]
+      spread: -10
+
+  - id: block_ioc
+    group: contain
+    label: Block the domain on DNS and the proxy, and the file hash in the EDR
+    takes: 10
+    result: The domain and the file hash are now blocked across the office.
+    effects:
+      set: [ioc_blocked]
+      spread: -5
+
+  - id: find_email
+    group: investigate
+    label: Find the invoice email and everyone who received it
+    takes: 15
+    result: Six people got the same email. One other person opened the attachment, but the macro was blocked because of an older setting on that PC.
+    effects:
+      set: [email_found]
+
+  - id: purge_email
+    group: contain
+    when: did.find_email
+    label: Delete the invoice email from every mailbox
+    takes: 10
+    result: All six copies are gone.
+    effects:
+      set: [email_purged]
+
+  - id: reset_maria
+    group: contain
+    label: Reset Maria's password in case the malware stole it
+    takes: 5
+    result: Maria's password is reset and her sessions revoked.
+    effects:
+      set: [maria_reset]
+
+  - id: update_manager
+    group: communicate
+    label: Tell the office manager what is happening and lend reception a spare laptop
+    takes: 10
+    result: Tom sets Maria up on a spare laptop. Visitors are checked in again within twenty minutes.
+    effects:
+      set: [manager_updated]
+      impact: -5
+
+  - id: reimage
+    group: recover
+    when: host_isolated
+    label: Reimage RECEPTION-PC2
+    takes: 1h
+    result: RECEPTION-PC2 is rebuilt from the standard image and handed back.
+    effects:
+      set: [reimaged]
+
+  - id: reimage_ws07
+    group: recover
+    when: ws07_isolated
+    label: Reimage DESIGN-WS07
+    takes: 1h
+    result: DESIGN-WS07 is rebuilt and the designer gets her files back from the server.
+    effects:
+      set: [ws07_reimaged]
+
+  - id: block_macros
+    group: recover
+    label: Block macros in Office files that come from the internet, for all users
+    takes: 20
+    result: The policy is live. Documents from outside the company open with macros disabled and no button to enable them.
+    effects:
+      set: [macros_blocked]
+
+  - id: close
+    group: coordinate
+    when: reimaged
+    label: Write up the incident and close it
+    takes: 10
+    result: You write up the timeline and close the incident.
+    effects:
+      end:
+        outcome: close
+        text: You closed the incident.
+
+rules:
+  - id: evidence_lost
+    when: reimaged and not triage_collected and not powered_off
+    effects:
+      evidence: -50
+    text: The rebuild wiped the only copy of the malware and its memory.
+
+  - id: loader_active
+    when: not host_isolated
+    every: 15
+    effects:
+      spread: 5
+
+  - id: ws07_active
+    when: ws07_infected and not ws07_isolated
+    every: 15
+    effects:
+      spread: 5
+
+  - id: ransomware
+    when: time >= 180 and (not host_isolated or (ws07_infected and not ws07_isolated))
+    effects:
+      end:
+        outcome: fail
+        text: |
+          At 17:05 files on the shared drive start getting a new extension. The
+          loader handed its access to a ransomware group, as the threat
+          intelligence warned it might.
+
+objectives:
+  - text: Contain the first PC within 30 minutes
+    pass: (did.isolate_host and at.isolate_host <= 30) or (did.pull_power and at.pull_power <= 30)
+    weight: 3
+    hit: You cut RECEPTION-PC2 off quickly, before it could reach the rest of the office.
+    miss: The infected PC stayed on the network too long. Isolation through the EDR agent takes five minutes and should come first.
+
+  - text: Keep the evidence before you clean up
+    pass: triage_collected
+    weight: 2
+    hit: You collected memory and a triage package before rebuilding, so the investigation has something to work with.
+    miss: The evidence is gone. Collect a triage package before a reimage, and isolate rather than power off.
+
+  - text: Find out how far it spread
+    pass: did.search_ioc and (not ws07_infected or ws07_isolated)
+    weight: 2
+    hit: You searched every PC for the indicators and dealt with whatever you found.
+    miss: You didn't check the rest of the office properly. One infected PC is rarely the whole story.
+
+  - text: Block the attacker's infrastructure
+    pass: ioc_blocked
+    weight: 1
+    hit: The domain and hash are blocked everywhere.
+    miss: The command and control domain was never blocked.
+
+  - text: Remove the infection and give the users working PCs
+    pass: reimaged and (not ws07_infected or ws07_reimaged)
+    weight: 2
+    hit: Every infected PC was rebuilt.
+    miss: At least one infected PC was never rebuilt.
+
+  - text: Close the door it came through
+    pass: email_purged and macros_blocked
+    weight: 2
+    hit: You removed the email and blocked internet macros, so the same trick won't work again tomorrow.
+    miss: The same email or the next one like it could start this again. Purge it and block internet macros.
+
+  - text: Keep the business informed
+    pass: manager_updated
+    weight: 1
+    hit: The office manager knew what was happening, and reception kept working.
+    miss: Reception was left without a computer or an update all afternoon.
+
+solution:
+  - isolate_host
+  - review_alert
+  - collect_triage
+  - search_ioc
+  - block_ioc
+  - find_email
+  - purge_email
+  - reset_maria
+  - update_manager
+  - reimage
+  - block_macros
+  - close
+
+references:
+  - NIST SP 800-61r3 (April 2025), incident response as a CSF 2.0 profile
+  - Microsoft guidance on blocking macros in files from the internet

@@ -1,0 +1,316 @@
+id: setpoint-change
+title: The cursor moved
+level: ot
+minutes: 20
+sector: Water and wastewater
+org: Millbrook Water Authority (fictional)
+role: You are the cybersecurity coordinator for a small water utility.
+summary: An operator watches someone remotely raise the chemical dosing setpoint at a water plant. Make the water safe, close the door, and tell the right people.
+start: Fri 13:32
+limit: 4h
+pass: 70
+
+briefing: |
+  Millbrook Water Authority treats and supplies drinking water to 22,000
+  people. Sodium hydroxide is dosed to control pH. The dosing pumps have a
+  physical maximum rate, and a high pH alarm stops dosing automatically.
+
+  Treated water spends about a day in the reservoir and mains before it
+  reaches homes. Staff use a remote desktop tool, installed on the HMI
+  computer, to check the plant from home. They share one password.
+
+meters:
+  safety:
+    label: Public health
+    start: 95
+    good: high
+  trust:
+    label: Public trust
+    start: 85
+    good: high
+  spread:
+    label: Attacker access
+    start: 40
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+
+injects:
+  - id: ellen_call
+    at: 0
+    from: Ellen Hart, Plant Operator
+    via: call
+    subject: Someone moved the mouse
+    body: |
+      "This is going to sound mad. Two minutes ago the mouse on the HMI started
+      moving by itself. Someone opened the sodium hydroxide screen and changed
+      the setpoint from 100 to 11,100 ppm, then disconnected. I put it straight
+      back to 100. I think someone used the remote desktop thing."
+
+  - id: greg_chat
+    at: 10
+    from: Greg Novak, Plant Manager
+    via: chat
+    subject: Glitch?
+    body: |
+      Ellen told me. Is this a glitch or a real thing? Do we need to tell
+      anyone? I'd rather not cause a panic over nothing.
+
+  - id: second_attempt
+    at: 40
+    when: not remote_disabled
+    from: Ellen Hart, Plant Operator
+    via: call
+    subject: It's happening again
+    body: |
+      "It's back! Someone connected again and changed the setpoint. I've put
+      it back, but I can't sit here all weekend fighting a mouse."
+    effects:
+      set: [second_attempt]
+      spread: 10
+      safety: -10
+
+  - id: lab_results
+    when: did.sample_water and time >= at.sample_water + 45
+    from: Water quality lab
+    via: email
+    subject: Results for today's samples
+    body: |
+      Plant outlet pH 7.3, reservoir pH 7.2. Sodium within normal range. No
+      sample shows any effect of an overdose.
+    effects:
+      set: [water_ok]
+
+  - id: social_post
+    at: 120
+    from: Local community group
+    via: news
+    subject: '"Did someone hack the water plant?"'
+    body: |
+      A post in the town's community group says a friend of a plant worker
+      heard the plant was hacked. It has 300 shares and people are asking if
+      the water is safe to drink.
+    effects:
+      trust: -10
+
+actions:
+  - id: confirm_setpoint
+    group: operations
+    label: Confirm the dosing setpoint is back to normal and check the pump limits and pH alarm
+    takes: 10
+    result: The setpoint is 100 ppm. The pump's physical maximum would have taken many hours to reach a harmful level, and the high pH alarm and its dosing cutout are working.
+    effects:
+      set: [setpoint_confirmed]
+
+  - id: sample_water
+    group: operations
+    label: Take water samples at the plant outlet and reservoir for urgent lab testing
+    takes: 15
+    result: Samples are on their way to the lab. Results in about 45 minutes.
+
+  - id: watch_screens
+    group: operations
+    label: Put an operator on continuous watch of the dosing screens
+    takes: 10
+    result: A second operator now watches the dosing screen at all times.
+    effects:
+      set: [watching]
+      safety: 5
+
+  - id: export_logs
+    group: investigate
+    when: not did.uninstall_remote
+    label: Export the remote tool's connection log and the HMI audit trail
+    takes: 15
+    result: |
+      The log shows two incoming sessions today from an ID nobody recognizes,
+      using the shared password. The HMI audit trail records the setpoint
+      change at 13:30.
+    effects:
+      set: [logs_exported]
+
+  - id: disable_remote
+    group: contain
+    when: not remote_disabled
+    label: Stop the remote desktop tool on all plant computers and block it at the firewall
+    takes: 5
+    result: The tool is stopped and blocked on every plant computer. Its logs are left in place.
+    effects:
+      set: [remote_disabled]
+      spread: -20
+
+  - id: uninstall_remote
+    group: contain
+    when: not remote_disabled
+    label: Uninstall the remote desktop tool from every plant computer
+    takes: 5
+    result: The tool is gone, and its connection logs went with it.
+    effects:
+      set: [remote_disabled]
+      spread: -20
+      evidence: -40
+    lesson: |
+      Uninstalling removed the logs investigators needed. Stop and block the
+      tool first, export the logs, then remove it.
+
+  - id: change_passwords
+    group: contain
+    label: Change the shared remote access password and every HMI account password
+    takes: 20
+    result: Every plant account has a new, unique password.
+    effects:
+      set: [creds_changed]
+      spread: -10
+
+  - id: check_exposure
+    group: investigate
+    label: Check how the plant network is exposed to the internet
+    takes: 30
+    result: |
+      The plant network is flat. The HMI computer can reach the internet
+      directly, and one control room PC still runs an unsupported operating
+      system. There is no firewall rule limiting remote tools.
+    effects:
+      set: [exposure_known]
+
+  - id: notify_regulator
+    group: communicate
+    label: Report to the drinking water regulator and the public health department
+    takes: 20
+    result: Both agencies thank you for the early call. They ask for the lab results as soon as you have them.
+    effects:
+      set: [regulator_told]
+
+  - id: notify_police
+    group: coordinate
+    label: Report to the police and the national cyber agency
+    takes: 15
+    result: Both take the report. The national agency offers technical help next week.
+    effects:
+      set: [police_told]
+
+  - id: public_statement
+    group: communicate
+    label: Prepare a short, factual public statement with the regulator
+    takes: 30
+    result:
+      - when: water_ok
+        text: The statement says what happened, that the change was reversed at once, and that lab tests show the water is safe. It calms the community group within the hour.
+      - text: The statement says what happened and that tests are under way. People want to know if the water is safe, so you plan to update it as soon as results arrive.
+    effects:
+      set: [statement_ready]
+      trust: 10
+
+  - id: shutdown_plant
+    group: operations
+    label: Shut down the treatment plant
+    takes: 20
+    result: The plant stops. The town runs on stored water while you investigate, and the rumour that the plant was hacked spreads faster.
+    effects:
+      trust: -10
+    lesson: |
+      Shutting down wasn't needed. The change had been reversed, the pump limit
+      and pH alarm worked, and treated water takes a day to reach homes. Make
+      sure the water is safe and close the door instead.
+
+  - id: secure_remote
+    group: recover
+    when: remote_disabled
+    label: Set up a supervised remote access method with individual accounts and MFA for on-call staff
+    takes: 30
+    result: On-call staff get individual accounts with MFA through a gateway that logs every session. The shared remote tool stays off.
+    effects:
+      set: [secure_remote]
+
+  - id: close
+    group: coordinate
+    when: remote_disabled
+    label: Write up the incident and close it
+    takes: 10
+    result: You write up the incident and close it.
+    effects:
+      end:
+        outcome: close
+        text: You closed the incident.
+
+rules:
+  - id: third_attempt
+    when: time >= 150 and not remote_disabled
+    effects:
+      safety: -25
+    text: The attacker connects again at 16:02 and pushes the setpoint up. The high pH alarm trips the dosing pump before the operator even sees it.
+
+  - id: open_door
+    when: not remote_disabled
+    every: 30
+    effects:
+      spread: 5
+
+objectives:
+  - text: Make sure the water is safe
+    pass: setpoint_confirmed and water_ok
+    weight: 3
+    hit: You confirmed the controls were back to normal and lab tests showed the water was safe.
+    miss: You didn't confirm the setpoint, the safeguards and the water quality. Public health comes first.
+
+  - text: Close the remote door within the hour
+    pass: (did.disable_remote and at.disable_remote <= 60) or (did.uninstall_remote and at.uninstall_remote <= 60)
+    weight: 3
+    hit: You shut the remote tool down quickly, so the attacker couldn't come back.
+    miss: The remote tool stayed open and the attacker came back.
+
+  - text: Keep the logs investigators will need
+    pass: logs_exported
+    weight: 2
+    hit: You exported the connection log and audit trail.
+    miss: The connection logs were lost or never exported.
+
+  - text: Take away the attacker's password
+    pass: creds_changed
+    weight: 1
+    hit: The shared password and the HMI passwords were changed.
+    miss: The shared password still works.
+
+  - text: Tell the authorities
+    pass: regulator_told and police_told
+    weight: 2
+    hit: The regulator, public health, the police and the national agency all heard from you.
+    miss: An attempt to change chemical dosing must be reported, even when nobody was harmed.
+
+  - text: Be ready to talk to the public
+    pass: statement_ready
+    weight: 1
+    hit: You had a factual statement ready when the rumour started.
+    miss: The community heard rumours and nothing from you.
+
+  - text: Understand how they got in
+    pass: exposure_known
+    weight: 1
+    hit: You found the exposure that made this possible.
+    miss: You didn't look at how the plant was exposed.
+
+  - text: Respond in proportion
+    pass: not did.shutdown_plant
+    weight: 1
+    hit: You kept the plant running safely instead of shutting it down for nothing.
+    miss: The shutdown wasn't needed and fed the rumours.
+
+solution:
+  - confirm_setpoint
+  - export_logs
+  - disable_remote
+  - watch_screens
+  - sample_water
+  - change_passwords
+  - notify_regulator
+  - notify_police
+  - public_statement
+  - check_exposure
+  - secure_remote
+  - close
+
+references:
+  - CISA and EPA guidance on cybersecurity for water and wastewater systems
+  - NIST SP 800-82r3, Guide to Operational Technology (OT) Security

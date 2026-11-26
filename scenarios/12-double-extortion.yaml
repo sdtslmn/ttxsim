@@ -1,0 +1,443 @@
+id: double-extortion
+title: Three days
+level: capstone
+minutes: 40
+sector: Port and marine services
+org: Orion Marine Services (fictional)
+role: You are the head of information security, and you will run this incident.
+summary: Ransomware takes down the company and the attackers say they stole customer data. Three days of recovery, customers, journalists, the regulator and the board.
+start: Mon 06:30
+limit: 3d
+pass: 70
+
+briefing: |
+  Orion Marine Services employs 1,200 people and runs towage, pilotage and
+  logistics for ports along the coast. Its ERP system runs billing, crew
+  scheduling and vessel bookings. Customers include large shipping lines.
+
+  The national data protection rules say the regulator must receive an
+  initial notice of a personal data breach **within 72 hours** of the
+  company becoming aware of it. Offline backups are kept in a separate
+  vault and tested quarterly. The cyber insurer provides an incident
+  response firm on request.
+
+  This exercise runs over three days. Long actions take hours. Use **wait**
+  to let time pass when your teams are busy.
+
+meters:
+  spread:
+    label: Attacker reach
+    start: 50
+    good: low
+  impact:
+    label: Operations disruption
+    start: 60
+    good: low
+  trust:
+    label: Customer and public trust
+    start: 75
+    good: high
+  compliance:
+    label: Regulatory standing
+    start: 80
+    good: high
+
+injects:
+  - id: it_call
+    at: 0
+    from: Ravi Menon, IT Operations Lead
+    via: call
+    subject: Everything is encrypted
+    body: |
+      "It's bad. ERP, email, the file shares, the scheduling system, all
+      encrypted. There's a note on every server from a group called NIGHTJAR.
+      They say they took 600 GB, including customer contracts and HR files,
+      and they want payment within five days. Some servers are still being
+      encrypted as we speak."
+
+  - id: ceo_call
+    at: 30
+    from: Helena Ruiz, CEO
+    via: call
+    subject: Who is running this?
+    body: |
+      "I've got the operations directors calling me, a tug crew that can't see
+      its schedule and the chairman asking questions. I need one person running
+      this and one clear picture. Is that you?"
+
+  - id: ops_chaos
+    at: 120
+    from: Peter Holm, Operations Director
+    via: email
+    subject: Crews and bookings
+    body: |
+      Pilots and tug crews can't see bookings or schedules. The port
+      authorities still expect us at every arrival. We need a way to keep
+      working without the systems, today.
+
+  - id: ir_arrives
+    when: insurer_called and time >= at.call_insurer + 3h
+    from: Incident response firm (via insurer)
+    via: email
+    subject: Team engaged
+    body: |
+      Our team is engaged, with forensic analysts and a negotiation advisor if
+      needed. Priorities: contain, preserve evidence, establish what data
+      left the network, and rebuild identity before anything else.
+    effects:
+      set: [ir_firm]
+
+  - id: journalist
+    at: 1500
+    from: Maritime Daily
+    via: call
+    subject: Leak site posting
+    body: |
+      "Hi, I'm writing about NIGHTJAR's leak site. They've posted Orion's name
+      and sample documents, including what look like customer contracts. Can
+      you confirm you've been attacked, and have customers been told?"
+    effects:
+      trust: -5
+
+  - id: customer_demand
+    at: 1560
+    from: Security team, Baltic Star Line
+    via: email
+    subject: Our contract data?
+    body: |
+      We have seen reports that Orion's data, including customer contracts, is
+      on a criminal leak site. Please confirm within 24 hours whether our data
+      is involved, and what you are doing about it.
+
+  - id: extortion_deadline
+    at: 2880
+    from: NIGHTJAR
+    via: email
+    subject: Last chance
+    body: |
+      You have 24 hours. Pay and we delete everything and give you proof. Do
+      not pay and all 600 GB goes public, and we will email your customers
+      ourselves.
+
+  - id: board_meeting
+    at: 3000
+    from: Office of the Chairman
+    via: email
+    subject: Board meeting today 08:30
+    body: The board meets this morning and expects a full update, including a position on the ransom demand.
+
+actions:
+  - id: crisis_team
+    group: coordinate
+    label: Stand up the crisis team with clear roles and a meeting rhythm
+    takes: 30
+    result: |
+      You lead. Ravi owns technical recovery, Peter owns operations, Legal and
+      Communications each have a lead, and the CEO chairs a decision meeting
+      twice a day.
+    effects:
+      set: [crisis_team]
+
+  - id: isolate_network
+    group: contain
+    label: Cut internet access and isolate the data centre segments from each other
+    takes: 1h
+    result: Internet links are down and each data centre segment is cut off. The encryption still running on a few servers stops spreading.
+    effects:
+      set: [network_isolated]
+      spread: -20
+      impact: 5
+
+  - id: out_of_band
+    group: coordinate
+    label: Set up out-of-band communication, with new phones and chat outside the company systems
+    takes: 30
+    result: The crisis team moves to a separate chat and phone list. The attackers may be reading company email, so sensitive talk stays off it.
+    effects:
+      set: [oob_comms]
+
+  - id: call_insurer
+    group: coordinate
+    label: Call the cyber insurer and engage its incident response firm
+    takes: 30
+    result: The claim is open. The insurer's response firm will join within three hours.
+    effects:
+      set: [insurer_called]
+
+  - id: report_police
+    group: coordinate
+    label: Report the attack to the police and the national cyber agency
+    takes: 30
+    result: Both take the report. The national agency shares indicators linked to NIGHTJAR.
+    effects:
+      set: [police_told]
+
+  - id: manual_ops
+    group: operations
+    label: Run operations on manual workarounds (paper schedules, phone bookings, spreadsheets)
+    takes: 1h
+    result: Operations moves to paper schedules and a phone booking line. It's slow, but every arrival is covered.
+    effects:
+      set: [manual_workarounds]
+      impact: -15
+
+  - id: holding_statement
+    group: communicate
+    label: Prepare a holding statement for media, customers and staff
+    takes: 30
+    result: A short, factual statement is approved and ready for anyone who asks.
+    effects:
+      set: [holding_statement]
+      trust: 5
+
+  - id: staff_comms
+    group: communicate
+    label: Tell staff what happened, what to do and what not to say
+    takes: 30
+    result: Staff get a clear message through managers and a text alert, including a reminder not to talk to the press.
+    effects:
+      set: [staff_told]
+
+  - id: verify_backups
+    group: investigate
+    label: Check the offline backups are clean and complete
+    takes: 4h
+    result: The vault backups from Saturday are intact and scan clean. ERP, email and file shares can be restored to Saturday night.
+    effects:
+      set: [backups_verified]
+
+  - id: scope_exfil
+    group: investigate
+    when: ir_firm
+    label: With the response firm, find out exactly what data left the network
+    takes: 8h
+    result: |
+      The attackers sent about **410 GB** out through a cloud sync tool over
+      four nights. It includes contracts and contact details for **38
+      customers** and HR files for about 300 staff. The ERP database itself was
+      not copied.
+    effects:
+      set: [exfil_scoped]
+
+  - id: customer_notice
+    group: communicate
+    when: exfil_scoped
+    label: Notify the 38 affected customers with facts and next steps
+    takes: 90
+    result: Account managers call each customer, then follow up in writing with what was taken and what Orion is doing. Most appreciate hearing it directly.
+    effects:
+      set: [customers_notified]
+      trust: 15
+
+  - id: notify_regulator
+    group: communicate
+    when: crisis_team
+    label: Send the regulator an initial breach notification
+    takes: 1h
+    result:
+      - when: exfil_scoped
+        text: The notification includes the scope of stolen data, the people affected and the steps taken. The regulator acknowledges it the same day.
+      - text: You send an initial notice with what you know so far and promise an update once the scope is clear. The regulator acknowledges it.
+    effects:
+      set: [regulator_notified]
+      compliance: 15
+
+  - id: rebuild_identity
+    group: recover
+    when: network_isolated
+    label: Rebuild the domain controllers and reset every account in a clean environment
+    takes: 12h
+    result: A clean identity system is up, every password has been reset and admin accounts now need MFA.
+    effects:
+      set: [identity_rebuilt]
+      spread: -30
+
+  - id: restore_email
+    group: recover
+    when: identity_rebuilt
+    label: Restore email from the offline backups
+    takes: 6h
+    result: Email is back, restored to Saturday night.
+    effects:
+      set: [email_restored]
+      impact: -10
+
+  - id: restore_erp
+    group: recover
+    when: identity_rebuilt and backups_verified
+    label: Restore the ERP system from the offline backups
+    takes: 10h
+    result: The ERP system is back with Saturday's data. Operations starts keying in the manual records.
+    effects:
+      set: [erp_restored]
+      impact: -30
+
+  - id: board_brief
+    group: communicate
+    when: crisis_team
+    label: Brief the board on status, decisions and the ransom question
+    takes: 1h
+    result: The board hears the plan, the restore timeline and Legal's view on the ransom demand.
+    effects:
+      set: [board_briefed]
+
+  - id: decide_no_pay
+    group: coordinate
+    when: board_briefed
+    label: Agree with the board and Legal not to pay for deletion
+    takes: 1h
+    result: The board agrees not to pay. Recovery is on track from backups, and paying would not guarantee deletion.
+    effects:
+      set: [no_pay]
+
+  - id: pay_for_deletion
+    group: coordinate
+    when: seen.extortion_deadline
+    label: Pay NIGHTJAR for deletion
+    takes: 1h
+    result: |
+      You pay. NIGHTJAR sends a "deletion log". Three weeks later, a sample of
+      the same data shows up for sale on another forum.
+    effects:
+      set: [paid]
+      trust: -10
+    lesson: |
+      Paying for deletion buys a promise from a criminal. Data is often kept or
+      resold, and payment can break sanctions law. Customers and regulators
+      judge you on how you protected and informed them, not on whether you paid.
+
+  - id: close
+    group: coordinate
+    when: erp_restored
+    label: Declare the incident contained and move to the recovery and lessons-learned phase
+    takes: 30
+    result: You declare the incident contained and hand recovery to the programme team.
+    effects:
+      end:
+        outcome: close
+        text: Orion is running on restored systems. Recovery and lessons learned continue, but the incident response phase is over.
+
+rules:
+  - id: attacker_still_in
+    when: not network_isolated
+    every: 1h
+    effects:
+      spread: 10
+      impact: 5
+
+  - id: no_workarounds
+    when: not manual_workarounds and not erp_restored
+    every: 4h
+    effects:
+      impact: 5
+
+  - id: press_without_statement
+    when: seen.journalist and not holding_statement
+    effects:
+      trust: -10
+    text: The trade press runs the story with "Orion did not respond to requests for comment".
+
+  - id: customers_hear_from_press
+    when: seen.customer_demand and not customers_notified
+    effects:
+      trust: -10
+    text: A major customer learned about the leak from the press, not from you.
+
+  - id: regulator_deadline
+    when: time >= 4319 and not regulator_notified
+    effects:
+      compliance: -30
+    text: The 72-hour deadline for the regulator has passed without a notification.
+
+  - id: lost_control
+    when: spread >= 100
+    effects:
+      end:
+        outcome: fail
+        text: With nobody containing it, the attackers keep access and encrypt the systems IT was trying to rebuild. The company is offline for weeks.
+
+objectives:
+  - text: Take charge early
+    pass: crisis_team and at.crisis_team <= 60 and oob_comms
+    weight: 2
+    hit: A crisis team with clear roles was running within the hour, on communication the attackers couldn't read.
+    miss: Nobody was clearly in charge early, or the team talked over channels the attackers could read.
+
+  - text: Contain the attacker within two hours
+    pass: network_isolated and at.isolate_network <= 120
+    weight: 3
+    hit: You cut the attacker off early, so the damage stopped growing.
+    miss: The attacker kept access too long.
+
+  - text: Know what was stolen before telling people
+    pass: exfil_scoped
+    weight: 2
+    hit: You established exactly what left and whose data it was.
+    miss: You never pinned down what data was stolen, so every message was guesswork.
+
+  - text: Meet the 72-hour regulator deadline
+    pass: regulator_notified
+    weight: 2
+    hit: The regulator got its notice inside 72 hours.
+    miss: The regulator was not notified in time.
+
+  - text: Tell affected customers before they read it in the news
+    pass: customers_notified and at.customer_notice <= 1500
+    weight: 2
+    hit: The 38 customers heard it from you before the press story on Tuesday morning.
+    miss: Customers learned about the leak from journalists.
+
+  - text: Recover in the right order
+    pass: erp_restored
+    weight: 3
+    hit: Identity first, then verified backups, then the business systems. That order is why the restore held.
+    miss: The ERP system was never restored.
+
+  - text: Keep the business running meanwhile
+    pass: manual_workarounds
+    weight: 1
+    hit: Operations kept every arrival covered on manual workarounds.
+    miss: Operations had no plan for working without systems.
+
+  - text: Keep staff, media and the board informed
+    pass: staff_told and holding_statement and board_briefed
+    weight: 2
+    hit: Staff, the media and the board each got the right message.
+    miss: Someone important was left without a message.
+
+  - text: Decide on the ransom with the board, on principle
+    pass: no_pay and not paid
+    weight: 1
+    hit: The board made a clear decision not to pay, based on the facts.
+    miss: The ransom decision was never made properly, or you paid.
+
+  - text: Bring in law enforcement and the insurer
+    pass: police_told and insurer_called
+    weight: 1
+    hit: The police, the national agency and the insurer were involved.
+    miss: You didn't bring in the police or the insurer.
+
+solution:
+  - crisis_team
+  - isolate_network
+  - call_insurer
+  - out_of_band
+  - holding_statement
+  - staff_comms
+  - report_police
+  - manual_ops
+  - verify_backups
+  - scope_exfil
+  - customer_notice
+  - notify_regulator
+  - board_brief
+  - rebuild_identity
+  - restore_email
+  - restore_erp
+  - decide_no_pay
+  - close
+
+references:
+  - CISA and partners, #StopRansomware Guide
+  - NIST SP 800-61r3 (April 2025), incident response as a CSF 2.0 profile
+  - Your regulator's guidance on personal data breach notification

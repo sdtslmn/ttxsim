@@ -1,0 +1,7 @@
+node_modules/
+dist/
+web/dist/
+src/core/generated/
+*.log
+.DS_Store
+ttxsim-report-*.md
