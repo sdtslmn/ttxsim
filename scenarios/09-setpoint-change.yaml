@@ -107,6 +107,22 @@ injects:
     effects:
       trust: -10
 
+  - id: opt_taste_complaints
+    optional: true
+    note: Raises the stakes. Use if the team has not thought about water already in the network.
+    from: Customer service
+    via: ticket
+    subject: Complaints about the water
+    body: Three customers in the north district say their tap water tastes soapy since this morning. One has a baby at home and asks if it is safe to drink.
+
+  - id: opt_forum_post
+    optional: true
+    note: Tests public communication when the story is already out.
+    from: Communications team
+    via: news
+    subject: A post on a local forum
+    body: A post on a local community forum says hackers took over the water plant. It has 400 shares and the local radio station is asking about it.
+
 actions:
   - id: confirm_setpoint
     group: operations

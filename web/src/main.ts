@@ -21,6 +21,9 @@ import {
   attackUrl,
   applyTailoring,
   tailorSummary,
+  DEFAULT_ROLES,
+  memberLabel,
+  type Member,
   type Delivered,
   type LogEntry,
   type Scenario,
@@ -35,6 +38,8 @@ type Reader =
   | { kind: "briefing" }
   | { kind: "message"; index: number }
   | { kind: "phase"; id: string }
+  | { kind: "decide"; action: string }
+  | { kind: "vote"; options: string[] }
   | { kind: "update"; entries: LogEntry[]; note?: string };
 
 let scenarios: Scenario[] = [];
@@ -44,6 +49,11 @@ let reader: Reader = { kind: "briefing" };
 let view: "home" | "setup" | "play" | "debrief" | "map" = "home";
 let mapScenario: Scenario | undefined;
 let setupScenario: Scenario | undefined;
+let setupTeam = false;
+/** Team play: action ids picked as vote options, while picking. */
+let picking: string[] | undefined;
+let facilOpen = true;
+let presenter = false;
 
 // ---- progress (per browser) ---------------------------------------------------
 
@@ -89,6 +99,27 @@ function saveSettings(id: string, values: Settings): void {
   }
 }
 
+type Seat = Member & { on: boolean };
+
+function savedSeats(): Seat[] {
+  let saved: Seat[] = [];
+  try {
+    saved = JSON.parse(localStorage.getItem("ttxsim.team") ?? "[]");
+  } catch {
+    saved = [];
+  }
+  const firstFour = new Set(["lead", "ops", "security", "comms"]);
+  return DEFAULT_ROLES.map((r) => saved.find((x) => x.role === r.id) ?? { role: r.id, name: "", on: firstFour.has(r.id) });
+}
+
+function saveSeats(seats: Seat[]): void {
+  try {
+    localStorage.setItem("ttxsim.team", JSON.stringify(seats));
+  } catch {
+    // Optional.
+  }
+}
+
 /** A built-in scenario with the settings last used in this browser. */
 function withSaved(s: Scenario): Scenario {
   return s.tailor.length ? applyTailoring(s, savedSettings(s.id)) : s;
@@ -98,9 +129,9 @@ function indexOfId(s: Scenario): number {
   return scenarios.findIndex((x) => x.id === s.id);
 }
 
-/** Play goes through the setup screen when a scenario has settings. */
-function begin(s: Scenario): void {
-  if ((s.template ?? s).tailor.length) openSetup(s);
+/** Play goes through the setup screen when a scenario has settings, or for team play. */
+function begin(s: Scenario, team = false): void {
+  if (team || (s.template ?? s).tailor.length) openSetup(s, team);
   else startScenario(s);
 }
 
@@ -130,12 +161,17 @@ const channelIcon: Record<string, string> = {
 
 function setView(v: typeof view): void {
   view = v;
+  if (v !== "play" && v !== "debrief") document.body.classList.remove("presenter");
+  else document.body.classList.toggle("presenter", presenter);
   render();
   window.scrollTo({ top: 0 });
 }
 
-function startScenario(s: Scenario): void {
+function startScenario(s: Scenario, team?: Member[]): void {
   sim = new Sim(s);
+  if (team?.length) sim.team = team;
+  picking = undefined;
+  facilOpen = true;
   reader = { kind: "briefing" };
   history.replaceState(null, "", `#${s.id}`);
   setView("play");
@@ -165,6 +201,7 @@ function renderHome(): string {
             </button>
             <div class="card-foot">
               <button class="btn small primary" data-start="${esc(s.id)}">Play</button>
+              <button class="btn small" data-team="${esc(s.id)}" title="Seats for each role, decisions with reasons, votes and facilitator injects">Run with a team</button>
               <button class="btn small ghost" data-map="${esc(s.id)}" title="Scenario map and MSEL for facilitators (contains spoilers)">Map and MSEL</button>
             </div>
           </div>`;
@@ -210,6 +247,12 @@ function bindHome(): void {
     b.addEventListener("click", () => {
       const s = scenarios.find((x) => x.id === b.dataset.map);
       if (s) openMap(withSaved(s));
+    }),
+  );
+  app.querySelectorAll<HTMLButtonElement>("[data-team]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const s = scenarios.find((x) => x.id === b.dataset.team);
+      if (s) begin(withSaved(s), true);
     }),
   );
   const input = app.querySelector<HTMLInputElement>("#file");
@@ -337,6 +380,8 @@ function renderReader(): string {
     return d ? messageHtml(d) : "";
   }
   if (reader.kind === "phase") return phaseHtml(reader.id);
+  if (reader.kind === "decide") return decideHtml(reader.action);
+  if (reader.kind === "vote") return voteHtml(reader.options);
   const parts: string[] = [];
   if (reader.note) parts.push(`<p class="muted note">${esc(reader.note)}</p>`);
   for (const e of reader.entries) {
@@ -358,6 +403,14 @@ function renderReader(): string {
   return parts.join("") || `<p class="muted pad">Nothing new happened.</p>`;
 }
 
+function teamBar(): string {
+  if (!sim!.team.length) return "";
+  if (!picking) return `<div class="vote-bar"><button class="btn small" data-vote-start title="Pick two to four actions and take a show of hands">Put options to a vote</button></div>`;
+  return `<div class="vote-bar picking"><span>Pick 2 to 4 options. <strong>${picking.length} picked.</strong></span>
+    <button class="btn small primary" data-vote-open ${picking.length < 2 ? "disabled" : ""}>Open the vote</button>
+    <button class="btn small ghost" data-vote-cancel>Cancel</button></div>`;
+}
+
 function renderActions(): string {
   const list = sim!.availableActions();
   const groups = GROUPS.map((g) => {
@@ -365,12 +418,12 @@ function renderActions(): string {
     if (!items.length) return "";
     return `<div class="group"><h4 title="${esc(GROUP_INFO[g].csf)}">${esc(GROUP_INFO[g].label)}</h4>${items
       .map(
-        (a) => `<button class="action g-${g}" data-act="${esc(a.id)}"><span>${esc(a.label)}</span><span class="dur">${esc(duration(a.takes))}</span></button>`,
+        (a) => `<button class="action g-${g}${picking?.includes(a.id) ? " picked" : ""}" data-act="${esc(a.id)}"><span>${esc(a.label)}</span><span class="dur">${esc(duration(a.takes))}</span></button>`,
       )
       .join("")}</div>`;
   }).join("");
   const long = sim!.scenario.limit > 1440;
-  return `${groups}
+  return `${teamBar()}${groups}
     <div class="group waits">
       <h4>Let time pass</h4>
       <div class="wait-row">
@@ -389,7 +442,8 @@ function renderPlay(): string {
   return `
   <header class="topbar play">
     <button class="brand link" data-home title="All scenarios"><span class="logo">T</span> TTXSim</button>
-    <div class="scenario-name">${esc(s.title)}</div>
+    <div class="scenario-name">${esc(s.title)}${sim!.team.length ? ` <span class="chip">Team</span>` : ""}</div>
+    <button class="btn small ghost" data-presenter title="Bigger text for a projector">${presenter ? "Exit presenter view" : "Presenter view"}</button>
     <div class="clock" aria-live="polite"><strong>${esc(clockLabel(s, sim!.time))}</strong><span>${esc(elapsedLabel(sim!.time))}</span></div>
   </header>
   <div class="meters">${renderMeters()}</div>
@@ -398,7 +452,171 @@ function renderPlay(): string {
     <aside class="pane inbox"><h2>Inbox ${unread ? `<span class="count">${unread}</span>` : ""}</h2><div class="mails">${renderInbox()}</div></aside>
     <section class="pane reader" aria-live="polite">${renderReader()}</section>
     <aside class="pane actions"><h2>Actions</h2>${renderActions()}</aside>
-  </main>`;
+  </main>
+  ${sim!.team.length ? facilitatorHtml() : ""}`;
+}
+
+// ---- team play ------------------------------------------------------------------------
+
+function decideHtml(id: string): string {
+  const a = sim!.scenario.actions.find((x) => x.id === id);
+  if (!a) return "";
+  const people = sim!.team.map((m) => `<option>${esc(memberLabel(m))}</option>`).join("");
+  return `<article class="message decide">
+    <div class="msg-head"><span class="tag act">Decision</span><span class="muted">${esc(clockLabel(sim!.scenario, sim!.time))}</span></div>
+    <h3>${esc(a.label)}</h3>
+    <p class="muted">${esc(GROUP_INFO[a.group].label)} · takes ${esc(duration(a.takes))}</p>
+    <label class="note-label" for="dec-by">Who made the call?</label>
+    <select class="note" id="dec-by"><option>The team</option>${people}<option>Facilitator</option></select>
+    <label class="note-label" for="dec-why">Why this, and why now?</label>
+    <textarea class="note" id="dec-why" rows="3" placeholder="One or two lines for the report"></textarea>
+    <div class="debrief-actions">
+      <button class="btn primary" data-decide="${esc(a.id)}">Do it</button>
+      <button class="btn" data-decide-vote="${esc(a.id)}">Vote on it against other options</button>
+      <button class="btn ghost" data-back>Back</button>
+    </div>
+  </article>`;
+}
+
+function voteHtml(options: string[]): string {
+  const acts = options.map((id) => sim!.scenario.actions.find((x) => x.id === id)!).filter(Boolean);
+  return `<article class="message vote">
+    <div class="msg-head"><span class="tag">Vote</span><span class="muted">${esc(clockLabel(sim!.scenario, sim!.time))}</span></div>
+    <h3>What do we do next?</h3>
+    <p class="muted">Read the options out, take a show of hands and enter the count for each.</p>
+    <div class="vote-options">${acts
+      .map(
+        (a) => `<div class="vote-opt"><div class="vote-label">${esc(a.label)} <span class="dur">${esc(duration(a.takes))}</span></div>
+          <input type="number" min="0" max="999" value="0" class="vote-count" data-votes="${esc(a.id)}" aria-label="Votes for ${esc(a.label)}" />
+          <div class="vote-track"><div class="vote-fill" data-fill="${esc(a.id)}"></div></div></div>`,
+      )
+      .join("")}</div>
+    <label class="note-label" for="vote-choice">Go with</label>
+    <select class="note" id="vote-choice">${acts.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join("")}</select>
+    <label class="note-label" for="dec-why">Why? Note the minority view too.</label>
+    <textarea class="note" id="dec-why" rows="3" placeholder="For the report and the hot wash"></textarea>
+    <div class="debrief-actions">
+      <button class="btn primary" data-vote-decide>Decide</button>
+      <button class="btn ghost" data-vote-cancel>Cancel the vote</button>
+    </div>
+  </article>`;
+}
+
+function facilitatorHtml(): string {
+  const list = sim!.pushable();
+  const pushRow = (i: (typeof list)[number]) => `<div class="push"><div><strong>${esc(i.subject)}</strong><span class="muted small"> ${esc(i.from)} · ${esc(CHANNEL_LABELS[i.via])}</span>${i.note ? `<small>${esc(i.note)}</small>` : ""}</div><button class="btn small" data-push="${esc(i.id)}">Push</button></div>`;
+  const own = list.filter((i) => !i.id.startsWith("fac_"));
+  const generic = list.filter((i) => i.id.startsWith("fac_"));
+  const decisions = sim!.decisions
+    .slice()
+    .reverse()
+    .map(
+      (d) => `<li><span class="muted">${esc(clockLabel(sim!.scenario, d.time))}</span> ${esc(d.label)}<small>${esc(d.by ?? "")}${d.vote ? ` · vote ${d.vote.map((o) => o.votes).join(" to ")}` : ""}${d.rationale ? ` · ${esc(d.rationale)}` : ""}</small></li>`,
+    )
+    .join("");
+  return `<details class="facil" ${facilOpen ? "open" : ""}>
+    <summary>Facilitator controls <span class="muted small">Close this before projecting: notes here are spoilers.</span></summary>
+    <div class="facil-grid">
+      <section><h4>Push an inject</h4>
+        ${own.length ? `<p class="muted small">From this scenario</p>${own.map(pushRow).join("")}` : ""}
+        ${generic.length ? `<p class="muted small">For any scenario</p>${generic.map(pushRow).join("")}` : ""}
+        ${list.length ? "" : `<p class="muted">Nothing left to push.</p>`}
+      </section>
+      <section><h4>Write your own</h4>
+        <input class="note" id="c-from" placeholder="From (for example: Plant manager)" maxlength="60" />
+        <input class="note" id="c-subj" placeholder="Subject" maxlength="100" />
+        <textarea class="note" id="c-body" rows="3" placeholder="Message"></textarea>
+        <select class="note" id="c-via">${(["chat", "call", "email", "alert", "news"] as const).map((v) => `<option value="${v}">${esc(CHANNEL_LABELS[v])}</option>`).join("")}</select>
+        <button class="btn small" data-csend>Send to the team</button>
+      </section>
+      <section><h4>Seats</h4><p class="seats">${sim!.team.map((m) => `<span class="chip">${esc(memberLabel(m))}</span>`).join(" ")}</p>
+        <h4>Decisions so far</h4>${decisions ? `<ul class="decisions">${decisions}</ul>` : `<p class="muted">None yet.</p>`}
+      </section>
+    </div>
+  </details>`;
+}
+
+function bindTeam(): void {
+  app.querySelector<HTMLButtonElement>("[data-presenter]")?.addEventListener("click", () => {
+    presenter = !presenter;
+    if (presenter) facilOpen = false;
+    document.body.classList.toggle("presenter", presenter);
+    render();
+  });
+  if (!sim!.team.length) return;
+  app.querySelector<HTMLDetailsElement>(".facil")?.addEventListener("toggle", (e) => (facilOpen = (e.target as HTMLDetailsElement).open));
+  app.querySelector("[data-vote-start]")?.addEventListener("click", () => {
+    picking = [];
+    render();
+  });
+  app.querySelectorAll("[data-vote-cancel]").forEach((b) =>
+    b.addEventListener("click", () => {
+      picking = undefined;
+      if (reader.kind === "vote") reader = { kind: "briefing" };
+      render();
+    }),
+  );
+  app.querySelector("[data-vote-open]")?.addEventListener("click", () => {
+    if (!picking || picking.length < 2) return;
+    reader = { kind: "vote", options: picking };
+    picking = undefined;
+    render();
+  });
+  app.querySelector("[data-back]")?.addEventListener("click", () => {
+    reader = { kind: "briefing" };
+    render();
+  });
+  app.querySelector<HTMLButtonElement>("[data-decide]")?.addEventListener("click", (e) => {
+    const id = (e.currentTarget as HTMLButtonElement).dataset.decide!;
+    const by = app.querySelector<HTMLSelectElement>("#dec-by")?.value;
+    const rationale = app.querySelector<HTMLTextAreaElement>("#dec-why")?.value;
+    const r = sim!.decide(id, { by, rationale });
+    after(r.events, r.ok ? undefined : r.error);
+  });
+  app.querySelector<HTMLButtonElement>("[data-decide-vote]")?.addEventListener("click", (e) => {
+    picking = [(e.currentTarget as HTMLButtonElement).dataset.decideVote!];
+    reader = { kind: "update", entries: [], note: "Pick at least one more option on the right, then open the vote." };
+    render();
+  });
+  // Live tally while counts are typed in.
+  let touched = false;
+  const choice = app.querySelector<HTMLSelectElement>("#vote-choice");
+  choice?.addEventListener("change", () => (touched = true));
+  const counts = () => [...app.querySelectorAll<HTMLInputElement>("[data-votes]")].map((i) => ({ id: i.dataset.votes!, n: Math.max(0, Number(i.value) || 0) }));
+  app.querySelectorAll<HTMLInputElement>("[data-votes]").forEach((input) =>
+    input.addEventListener("input", () => {
+      const c = counts();
+      const total = c.reduce((n, x) => n + x.n, 0);
+      for (const x of c) {
+        const fill = app.querySelector<HTMLElement>(`[data-fill="${CSS.escape(x.id)}"]`);
+        if (fill) fill.style.width = `${total ? Math.round((x.n / total) * 100) : 0}%`;
+      }
+      if (!touched && choice && total) choice.value = c.reduce((a, b) => (b.n > a.n ? b : a)).id;
+    }),
+  );
+  app.querySelector("[data-vote-decide]")?.addEventListener("click", () => {
+    if (reader.kind !== "vote") return;
+    const c = counts();
+    const vote = c.map((x) => ({ action: x.id, label: sim!.scenario.actions.find((a) => a.id === x.id)?.label ?? x.id, votes: x.n }));
+    const rationale = app.querySelector<HTMLTextAreaElement>("#dec-why")?.value;
+    const r = sim!.decide(choice!.value, { by: "Team vote", rationale, vote });
+    after(r.events, r.ok ? undefined : r.error);
+  });
+  app.querySelectorAll<HTMLButtonElement>("[data-push]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const events = sim!.push(b.dataset.push!);
+      after(events);
+    }),
+  );
+  app.querySelector("[data-csend]")?.addEventListener("click", () => {
+    const val = (id: string) => app.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(id)?.value ?? "";
+    if (!val("#c-subj").trim()) {
+      app.querySelector<HTMLInputElement>("#c-subj")?.focus();
+      return;
+    }
+    const events = sim!.pushCustom(val("#c-from"), val("#c-subj"), val("#c-body"), val("#c-via") as "chat");
+    after(events);
+  });
 }
 
 function after(entries: LogEntry[], note?: string): void {
@@ -451,10 +669,23 @@ function bindPlay(): void {
   );
   app.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((b) =>
     b.addEventListener("click", () => {
-      const r = sim!.act(b.dataset.act!);
+      const id = b.dataset.act!;
+      if (picking) {
+        picking = picking.includes(id) ? picking.filter((x) => x !== id) : picking.length < 4 ? [...picking, id] : picking;
+        render();
+        return;
+      }
+      if (sim!.team.length) {
+        reader = { kind: "decide", action: id };
+        render();
+        if (window.innerWidth < 900) app.querySelector(".reader")?.scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+      const r = sim!.act(id);
       after(r.events, r.ok ? undefined : r.error);
     }),
   );
+  bindTeam();
   app.querySelectorAll<HTMLButtonElement>("[data-wait]").forEach((b) =>
     b.addEventListener("click", () => {
       const before = sim!.time;
@@ -492,8 +723,9 @@ function twoStep(button: HTMLButtonElement, prompt: string, run: () => void): vo
 
 // ---- setup (tailoring) -------------------------------------------------------------
 
-function openSetup(s: Scenario): void {
+function openSetup(s: Scenario, team = false): void {
   setupScenario = s;
+  setupTeam = team;
   history.replaceState(null, "", `#setup/${s.id}`);
   setView("setup");
 }
@@ -519,19 +751,46 @@ function renderSetup(): string {
     <section class="setup-box">
       <h1>${esc(s.title)}</h1>
       <p class="muted">${esc(s.summary)}</p>
-      <p>Tailor the exercise before you start. Names appear in the briefing and messages. Yes or no settings change what your team has to work with, and the scenario plays out differently.</p>
       <form id="setup-form">
-        ${rows}
+        <fieldset class="mode">
+          <legend>How are you playing?</legend>
+          <label class="field toggle"><input type="radio" name="mode" value="solo" ${setupTeam ? "" : "checked"} /><span><strong>On my own</strong><small>You make every decision.</small></span></label>
+          <label class="field toggle"><input type="radio" name="mode" value="team" ${setupTeam ? "checked" : ""} /><span><strong>As a team, with a facilitator</strong><small>Each decision records who made the call and why. Put options to a vote, and push extra injects when the room needs pressure. Works on a projector.</small></span></label>
+        </fieldset>
+        <div class="roster" ${setupTeam ? "" : "hidden"}>
+          <h3>Seats at the table</h3>
+          <p class="muted small">Tick the seats you have. Names are optional and go into the report.</p>
+          ${savedSeats()
+            .map(
+              (seat) => `<div class="seat"><label><input type="checkbox" name="seat_${esc(seat.role)}" ${seat.on ? "checked" : ""} /> ${esc(DEFAULT_ROLES.find((r) => r.id === seat.role)!.label)}</label><input type="text" name="name_${esc(seat.role)}" value="${esc(seat.name)}" placeholder="Name (optional)" maxlength="40" /></div>`,
+            )
+            .join("")}
+        </div>
+        ${fields.length ? `<h3 class="setup-h">Tailor the scenario</h3><p class="muted small">Names appear in the briefing and messages. Yes or no settings change what you have to work with, and the scenario plays out differently.</p>${rows}` : ""}
         <div class="debrief-actions">
           <button type="submit" class="btn primary">Start the exercise</button>
           <button type="button" class="btn" data-setup-map title="Contains spoilers">Map and MSEL with these settings</button>
-          <button type="button" class="btn ghost" data-reset>Back to defaults</button>
+          ${fields.length ? `<button type="button" class="btn ghost" data-reset>Back to defaults</button>` : ""}
           <button type="button" class="btn ghost" data-home>All scenarios</button>
         </div>
       </form>
       <p class="muted small">Settings stay in this browser only.</p>
     </section>
   </main>`;
+}
+
+function readTeam(): Member[] | undefined {
+  const form = app.querySelector<HTMLFormElement>("#setup-form")!;
+  const team = (form.elements.namedItem("mode") as RadioNodeList | null)?.value === "team";
+  const seats: Seat[] = DEFAULT_ROLES.map((r) => ({
+    role: r.id,
+    name: (form.elements.namedItem(`name_${r.id}`) as HTMLInputElement | null)?.value.trim() ?? "",
+    on: (form.elements.namedItem(`seat_${r.id}`) as HTMLInputElement | null)?.checked ?? false,
+  }));
+  saveSeats(seats);
+  if (!team) return undefined;
+  const used = seats.filter((x) => x.on).map(({ role, name }) => ({ role, name }));
+  return used.length ? used : [{ role: "lead", name: "" }];
 }
 
 function readSetup(): Scenario {
@@ -556,10 +815,18 @@ function bindSetup(): void {
   );
   app.querySelector<HTMLFormElement>("#setup-form")?.addEventListener("submit", (e) => {
     e.preventDefault();
-    startScenario(readSetup());
+    const team = readTeam();
+    startScenario(readSetup(), team);
   });
+  app.querySelectorAll<HTMLInputElement>('input[name="mode"]').forEach((r) =>
+    r.addEventListener("change", () => {
+      setupTeam = r.value === "team" && r.checked;
+      app.querySelector<HTMLElement>(".roster")!.hidden = !setupTeam;
+    }),
+  );
   app.querySelector("[data-setup-map]")?.addEventListener("click", () => openMap(readSetup()));
   app.querySelector("[data-reset]")?.addEventListener("click", () => {
+    setupTeam = (app.querySelector<HTMLInputElement>('input[name="mode"]:checked')?.value ?? "solo") === "team";
     setupScenario = applyTailoring(setupScenario!, {});
     render();
   });
@@ -688,6 +955,7 @@ function renderDebrief(): string {
     ${lessons}
     <section class="block"><h3>Where things ended</h3><table class="table"><thead><tr><th>Measure</th><th>Start</th><th>End</th><th></th></tr></thead><tbody>${meters}</tbody></table></section>
     <section class="block"><details><summary>Timeline (${sim!.log.length} events)</summary><table class="table timeline"><tbody>${timeline}</tbody></table></details></section>
+    ${teamHtml()}
     ${attackHtml(s)}
     ${notesHtml()}
     <section class="block"><h3>Your path against the model path</h3>${renderFlow(buildFlow(s), overlayPath(buildFlow(s), sim!))}</section>
@@ -697,6 +965,21 @@ function renderDebrief(): string {
       <li>Does our real incident response plan cover this situation? Who owns each gap?</li>
     </ul></section>
   </main>`;
+}
+
+function teamHtml(): string {
+  if (!sim || (!sim.decisions.length && !sim.pushed.length)) return "";
+  const s = sim.scenario;
+  const rows = sim.decisions
+    .map(
+      (d) => `<tr><td class="muted">${esc(clockLabel(s, d.time))}</td><td>${esc(d.label)}</td><td>${esc(d.by ?? "")}</td><td>${d.vote ? esc(d.vote.map((o) => `${o.label}: ${o.votes}`).join("; ")) : ""}</td><td>${esc(d.rationale ?? "")}</td></tr>`,
+    )
+    .join("");
+  const pushed = sim.pushed.map((p) => `<li><span class="muted">${esc(clockLabel(s, p.time))}</span> ${esc(p.subject)}${p.custom ? ` <span class="muted">(written on the day)</span>` : ""}</li>`).join("");
+  return `<section class="block"><h3>Team decisions</h3>
+    ${rows ? `<table class="table"><thead><tr><th>Time</th><th>Decision</th><th>Decided by</th><th>Vote</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table>` : `<p class="muted">No decisions were recorded.</p>`}
+    ${pushed ? `<h3>Injects pushed by the facilitator</h3><ul class="pushed">${pushed}</ul>` : ""}
+  </section>`;
 }
 
 function attackHtml(s: Scenario): string {
@@ -736,10 +1019,10 @@ function bindDebrief(): void {
       setView("home");
     }),
   );
-  app.querySelector("[data-retry]")?.addEventListener("click", () => startScenario(sim!.scenario));
+  app.querySelector("[data-retry]")?.addEventListener("click", () => startScenario(sim!.scenario, sim!.team));
   app.querySelector("[data-next]")?.addEventListener("click", () => {
     const next = scenarios[indexOfId(sim!.scenario) + 1];
-    if (next) begin(withSaved(next));
+    if (next) begin(withSaved(next), sim!.team.length > 0);
   });
   app.querySelector("[data-report]")?.addEventListener("click", () => download(`ttxsim-report-${sim!.scenario.id}.md`, reportMarkdown(sim!), "text/markdown"));
   app.querySelector("[data-map]")?.addEventListener("click", () => openMap(sim!.scenario));

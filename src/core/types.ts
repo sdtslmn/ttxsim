@@ -61,6 +61,10 @@ export interface Inject {
   id: string;
   at?: number;
   when?: string;
+  /** Only delivered when a facilitator pushes it. "when" then limits when it can be pushed. */
+  optional?: boolean;
+  /** Facilitator note: when and why to push an optional inject. */
+  note?: string;
   from: string;
   via: Channel;
   subject: string;

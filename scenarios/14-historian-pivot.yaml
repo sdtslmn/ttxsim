@@ -119,6 +119,24 @@ injects:
     effects:
       spread: 20
 
+  - id: opt_board_pack
+    optional: true
+    when: replication_cut and not one_way
+    note: Pushes to reconnect the historian link before it is safe.
+    from: Chief financial officer
+    via: email
+    subject: Dashboards for the board
+    body: The board meets tomorrow at nine and the pack is built from the historian dashboards. Please have them working by tonight. If security is the blocker, tell me who to speak to.
+
+  - id: opt_soc_pushback
+    optional: true
+    when: replication_cut
+    note: Tests who owns the decision to cut an IT to OT link.
+    from: IT security operations centre
+    via: chat
+    subject: Is cutting the link really needed?
+    body: Honestly, cutting the historian link feels like an overreaction. We've contained the phishing on our side. Can you put it back so our monitoring works again?
+
 actions:
   - id: cut_replication
     group: contain

@@ -30,6 +30,14 @@ export function checkPlayable(s: Scenario): CheckResult {
       if (d.failed) problems.push(`the solution ends in failure: ${d.endText}`);
       const missed = d.objectives.filter((o) => !o.passed).map((o) => o.objective.text);
       if (missed.length) problems.push(`the solution misses: ${missed.join("; ")}`);
+      // Optional injects must not break the model response when a facilitator pushes them all early.
+      const own = s.injects.filter((i) => i.optional).map((i) => i.id);
+      if (own.length) {
+        const pushed = runSteps(s, s.solution, (x) => own.forEach((id) => x.push(id)));
+        if (!pushed.ended) pushed.finish();
+        const dp = pushed.debrief();
+        if (dp.failed || dp.score < 100) problems.push(`with every optional inject pushed at the start, the solution scores ${dp.score}%${dp.failed ? " and fails" : ""}`);
+      }
     } catch (err) {
       problems.push(`the solution cannot be played: ${(err as Error).message}`);
     }

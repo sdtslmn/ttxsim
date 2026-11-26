@@ -140,6 +140,25 @@ injects:
       Crews are at North-7 and North-9 with the substations under local control.
       Breakers can be closed by hand when the control room gives the word.
 
+  - id: opt_ministry
+    optional: true
+    when: not restored
+    note: Pushes for a fast restoration. Tests whether the team restores before the rogue source is cut off.
+    from: Ministry of Energy duty officer
+    via: call
+    subject: The ministry wants a time
+    body: |
+      "Two hospitals are on backup generators. The minister wants supply back
+      within the hour and wants to know who is responsible for this."
+
+  - id: opt_social_blackout
+    optional: true
+    note: Tests public communication during an outage nobody has explained yet.
+    from: Communications team
+    via: news
+    subject: Videos of the blackout online
+    body: Videos of dark streets in the northern districts are trending, with people saying the grid was hacked. A national TV channel asks for a statement.
+
 actions:
   - id: identify_source
     group: investigate

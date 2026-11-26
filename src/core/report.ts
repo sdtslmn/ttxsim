@@ -1,4 +1,5 @@
 import { tailorSummary } from "./load.js";
+import { memberLabel } from "./facilitator.js";
 import type { Debrief, Sim } from "./engine.js";
 import { clockLabel, duration } from "./clock.js";
 import { buildFlow, overlayPath } from "./flow.js";
@@ -70,6 +71,7 @@ export function reportMarkdown(sim: Sim, when = new Date()): string {
       lines.push("");
     }
   }
+  lines.push(...teamMarkdown(sim));
   if (s.attack.length) {
     lines.push(attackMarkdown(s));
   }
@@ -129,3 +131,43 @@ export function reportMarkdown(sim: Sim, when = new Date()): string {
   lines.push("");
   return lines.join("\n");
 }
+
+const cell = (t: string) => t.replace(/\s+/g, " ").replace(/\|/g, "/").trim();
+
+/** Team roster, decisions with votes and rationale, and facilitator injects. Empty for solo play. */
+export function teamMarkdown(sim: Sim): string[] {
+  const s = sim.scenario;
+  const out: string[] = [];
+  if (sim.team.length) {
+    out.push("## Team");
+    out.push("");
+    out.push("| Seat | Name |");
+    out.push("| --- | --- |");
+    for (const m of sim.team) out.push(`| ${cell(memberLabel({ role: m.role, name: "" }))} | ${cell(m.name) || "_not named_"} |`);
+    out.push("");
+  }
+  if (sim.decisions.length) {
+    out.push("## Team decisions");
+    out.push("");
+    out.push("| Time | Decision | Decided by | Vote | Why |");
+    out.push("| --- | --- | --- | --- | --- |");
+    for (const d of sim.decisions) {
+      const vote = d.vote ? d.vote.map((o) => `${o.label}: ${o.votes}`).join("; ") : "";
+      out.push(`| ${clockLabel(s, d.time)} | ${cell(d.label)} | ${cell(d.by ?? "")} | ${cell(vote)} | ${cell(d.rationale ?? "")} |`);
+    }
+    out.push("");
+    const split = sim.decisions.filter((d) => d.vote && d.vote.filter((o) => o.votes > 0).length > 1);
+    if (split.length) {
+      out.push(`${split.length} decision${split.length === 1 ? " was" : "s were"} not unanimous. These are good places to start the hot wash.`);
+      out.push("");
+    }
+  }
+  if (sim.pushed.length) {
+    out.push("## Injects pushed by the facilitator");
+    out.push("");
+    for (const p of sim.pushed) out.push(`- ${clockLabel(s, p.time)}: ${p.subject}${p.custom ? " (written on the day)" : ""}`);
+    out.push("");
+  }
+  return out;
+}
+

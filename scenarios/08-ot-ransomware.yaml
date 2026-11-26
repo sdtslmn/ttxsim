@@ -137,6 +137,29 @@ injects:
       connect through our usual remote VPN right now and help reinstall the
       HMI software. Just enable our account and we'll get started.
 
+  - id: opt_ship_order
+    optional: true
+    when: not restore_done
+    note: Use if the team settles too quickly on keeping the lines down. Tests who can decide to stop production.
+    from: Plant manager
+    via: call
+    subject: The Monday shipment
+    body: |
+      "We have the biggest retail order of the year shipping Monday morning. Can
+      we run line 1 by hand from the local panels today? I need an answer I can
+      give the commercial director."
+
+  - id: opt_old_backup
+    optional: true
+    when: not logic_verified
+    note: Tests whether the recovery plan assumes the backups are good.
+    from: Control systems engineer
+    via: chat
+    subject: The PLC backups are old
+    body: |
+      I just checked. The last saved PLC backup for line 2 is from March. We made
+      two logic changes since then and I'm not sure anyone saved them.
+
 actions:
   - id: cut_it_ot
     group: contain

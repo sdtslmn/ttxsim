@@ -17,6 +17,10 @@ import {
   applyTailoring,
   parseTailorArgs,
   tailorSummary,
+  DEFAULT_ROLES,
+  memberLabel,
+  roleLabel,
+  type Member,
   reportMarkdown,
   ScenarioError,
   Sim,
@@ -92,8 +96,27 @@ function listScenarios(): void {
   say(`Type ${c.cyan("play 1")} to start, or ${c.cyan("load my-scenario.yaml")} for your own.`);
 }
 
+let pendingTeam: Member[] = [];
+
+/** Read "by=lead because we have to" from the words after an action. */
+function decisionMeta(rest: string[]): { by?: string; rationale?: string } {
+  let by: string | undefined;
+  const words2: string[] = [];
+  for (const w of rest) {
+    if (w.startsWith("by=")) {
+      const id = w.slice(3);
+      const m = sim?.team.find((x) => x.role === id);
+      by = m ? memberLabel(m) : DEFAULT_ROLES.some((r) => r.id === id) ? roleLabel(id) : id;
+    } else words2.push(w);
+  }
+  if (words2[0]?.toLowerCase() === "because") words2.shift();
+  const rationale = words2.join(" ").trim() || undefined;
+  return { by, rationale };
+}
+
 function start(s: Scenario): void {
   sim = new Sim(s);
+  sim.team = pendingTeam;
   reported = false;
   say();
   say(rule(s.title));
@@ -328,6 +351,7 @@ ${c.bold("During an exercise")}
   read [n]               read message n, or the next unread one
   actions                list what you can do right now
   do <n|id>              take an action (each one takes time)
+  do <n> by=lead because <reason>   record who decided and why
   wait [30m|1h]          let time pass; on its own, waits for the next message
   status                 clock, measures and objectives
   brief                  show the briefing again
@@ -343,6 +367,10 @@ ${c.bold("After an exercise")}
   next                   start the next scenario
 
 ${c.bold("For facilitators")}
+  team lead=Sara ops=Omar   seat a team (seats: ${DEFAULT_ROLES.map((r) => r.id).join(", ")})
+  vote 2=5 4=1 [because ...]  record a show of hands and take the winning option
+  push [n]               list optional injects, or push one now
+  push "Subject" "Text"  send an inject you write on the spot
   map <n|id>             show a scenario's map (spoilers)
   msel <n|id> [file]     save the master scenario events list (.md, or .csv)
 
@@ -474,6 +502,32 @@ function run(line: string): boolean {
       }
       return true;
     }
+    case "team": {
+      if (typed.length) {
+        const seats: Member[] = [];
+        for (const w of typed) {
+          const [role, ...name] = w.split("=");
+          if (!DEFAULT_ROLES.some((r) => r.id === role)) {
+            say(c.red(`No seat "${role}". Seats: ${DEFAULT_ROLES.map((r) => r.id).join(", ")}.`));
+            return true;
+          }
+          seats.push({ role, name: name.join("=") });
+        }
+        pendingTeam = seats;
+        if (sim && !sim.ended) sim.team = seats;
+      }
+      const seats = sim?.team.length ? sim.team : pendingTeam;
+      if (!seats.length) {
+        say("Solo play. To play as a team, name the seats, for example:");
+        say(c.cyan("  team lead=Sara ops=Omar security=Lina comms"));
+        say(c.dim(`Seats: ${DEFAULT_ROLES.map((r) => `${r.id} (${r.label})`).join(", ")}`));
+      } else {
+        say(c.bold("Team"));
+        for (const m of seats) say(`  ${memberLabel(m)}`);
+        say(c.dim(`In team play, add who decided and why: do 3 by=lead because <reason>. Put options to a vote with vote 2=5 4=1. The facilitator can push injects with push.`));
+      }
+      return true;
+    }
     case "next": {
       const i = sim ? scenarios.findIndex((x) => x.id === sim!.scenario.id) : -1;
       const s = scenarios[i + 1];
@@ -510,13 +564,59 @@ function run(line: string): boolean {
         say("Usage: do <number or id>. Type actions to see the list.");
         break;
       }
-      const r = sim.act(arg);
+      const [ref, ...more] = typed;
+      const { by, rationale } = decisionMeta(more);
+      const r = by || rationale || sim.team.length ? sim.decide(ref, { by, rationale }) : sim.act(ref);
       if (!r.ok && !r.events.length) say(c.red(r.error ?? "That didn't work."));
       else showEvents(r.events);
       if (!sim.ended && r.ok) {
         if (sim.scenario.status.length) say(`  ${statusLine()}`);
         say(c.dim(`${header()}  Type actions for what's next.`));
       }
+      break;
+    }
+    case "vote": {
+      // vote 3=4 5=2 because ...
+      const counts: { ref: string; votes: number }[] = [];
+      const rest2: string[] = [];
+      for (const w of typed) {
+        const m = /^(\w+)=(\d+)$/.exec(w);
+        if (m && !rest2.length) counts.push({ ref: m[1], votes: Number(m[2]) });
+        else rest2.push(w);
+      }
+      const options = counts.map((x) => ({ ...x, action: sim!.findAction(x.ref) }));
+      const bad = options.find((o) => !o.action);
+      if (counts.length < 2 || bad) {
+        say(bad ? c.red(`Option "${bad.ref}" is not an action you can take now.`) : "Usage: vote <n>=<votes> <m>=<votes> [because <reason>]. Example: vote 2=5 4=1 because we need the path cut first");
+        break;
+      }
+      const top = options.reduce((a, b) => (b.votes > a.votes ? b : a));
+      const { rationale } = decisionMeta(rest2);
+      const r = sim.decide(top.action!.id, { by: "Team vote", rationale, vote: options.map((o) => ({ action: o.action!.id, label: o.action!.label, votes: o.votes })) });
+      say(c.dim(`The vote goes to: ${top.action!.label} (${top.votes} of ${options.reduce((n, o) => n + o.votes, 0)}).`));
+      showEvents(r.events);
+      if (!sim.ended && r.ok) say(c.dim(`${header()}  Type actions for what's next.`));
+      break;
+    }
+    case "push": {
+      const list = sim.pushable();
+      if (!typed.length) {
+        if (!list.length) say("No optional injects left to push.");
+        list.forEach((inj, i) => {
+          say(`  ${c.cyan(String(i + 1).padStart(2))}. ${inj.subject} ${c.dim(`(${inj.from}${inj.id.startsWith("fac_") ? ", any scenario" : ""})`)}`);
+          if (inj.note) say(`      ${c.dim(inj.note)}`);
+        });
+        say(c.dim(`Type push <n> to send one, or push "Subject" "Message" from="Sender" to write your own.`));
+        break;
+      }
+      const pick = /^\d+$/.test(typed[0]) ? list[Number(typed[0]) - 1] : list.find((x) => x.id === typed[0]);
+      if (pick) {
+        showEvents(sim.push(pick.id));
+        break;
+      }
+      const from = typed.find((w) => w.startsWith("from="))?.slice(5) ?? "Facilitator";
+      const text = typed.filter((w) => !w.startsWith("from="));
+      showEvents(sim.pushCustom(from, text[0] ?? "", text.slice(1).join(" ")));
       break;
     }
     case "wait":

@@ -116,6 +116,23 @@ injects:
       spread: 20
       supply: 10
 
+  - id: opt_drone
+    optional: true
+    note: Tests whether the team links physical security reports to the cyber picture.
+    from: Security monitoring
+    via: alert
+    subject: Drone over PS-9
+    body: The PS-9 camera picked up a small drone hovering over the control building for four minutes.
+
+  - id: opt_tech_insists
+    optional: true
+    when: not seen.police_onsite
+    note: Tests the lone worker rule when someone pushes back.
+    from: On-call technician
+    via: call
+    subject: The technician wants to go in
+    body: '"I''m ten minutes away and I know that station. Let me just go and have a look. I''ll be careful."'
+
 actions:
   - id: call_police
     group: coordinate

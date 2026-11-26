@@ -94,6 +94,26 @@ injects:
     effects:
       spread: 10
 
+  - id: opt_restart_pressure
+    optional: true
+    when: not logic_restored
+    note: Pushes toward a restart before the safety logic can be trusted. Watch who holds the line.
+    from: General manager
+    via: call
+    subject: Every hour costs money
+    body: |
+      "Every hour offline costs us around 400,000 dollars. The vendor says they
+      can bypass the trip and restart under supervision while you investigate.
+      Why can't we do that?"
+
+  - id: opt_unit2_warning
+    optional: true
+    note: Tests whether the team checks the other unit that has the same controller.
+    from: Control room operator
+    via: alert
+    subject: Unit 2 safety controller diagnostic
+    body: The Unit 2 safety controller, the same model as Unit 1, shows a diagnostic warning nobody recognises. Unit 2 is still running.
+
 actions:
   - id: hold_restart
     group: operations

@@ -1363,3 +1363,234 @@ details summary {
 .small {
   font-size: 13px;
 }
+
+/* ---- team play ---- */
+
+.mode {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode legend,
+.setup-h,
+.roster h3 {
+  font-weight: 600;
+  font-size: 16px;
+  margin: 6px 0 6px;
+}
+
+.roster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.roster .muted.small,
+.setup-h + .muted.small {
+  margin: 0 0 4px;
+}
+
+.seat {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(140px, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.seat label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.seat input[type="text"] {
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.chip {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  vertical-align: middle;
+}
+
+.vote-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 14px 4px;
+}
+
+.vote-bar.picking {
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.action.picked {
+  outline: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.decide select.note,
+.vote select.note {
+  max-width: 100%;
+}
+
+.vote-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 6px;
+}
+
+.vote-opt {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: 4px 10px;
+  align-items: center;
+}
+
+.vote-label .dur {
+  color: var(--muted);
+  font-size: 13px;
+  margin-left: 4px;
+}
+
+.vote-count {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  width: 100%;
+}
+
+.vote-track {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.vote-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+
+.facil {
+  max-width: 1400px;
+  margin: 0 auto 30px;
+  padding: 0 16px;
+}
+
+.facil > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.facil[open] > summary {
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.facil-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 14px;
+}
+
+.facil-grid h4 {
+  margin: 0 0 8px;
+}
+
+.facil-grid section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.push {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.push small,
+.decisions small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.decisions {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+
+.decisions li {
+  margin-bottom: 6px;
+}
+
+.seats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+/* Presenter view: larger text for a projector. */
+body.presenter {
+  font-size: 19px;
+}
+
+body.presenter .reader .text,
+body.presenter .reader h3 {
+  font-size: 1.15em;
+}
+
+body.presenter .action {
+  font-size: 16px;
+}
+
+body.presenter .meter-label,
+body.presenter .clock strong {
+  font-size: 18px;
+}
+
+@media (max-width: 640px) {
+  .seat {
+    grid-template-columns: 1fr;
+  }
+}

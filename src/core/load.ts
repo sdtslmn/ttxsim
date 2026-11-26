@@ -146,11 +146,15 @@ export function loadScenario(source: string, file = ""): Scenario {
     const where = `inject ${x?.id ?? i + 1}`;
     const via = (x?.via ?? "email") as Channel;
     if (!CHANNELS.includes(via)) problems.push(`${where}: via "${x?.via}" must be one of ${CHANNELS.join(", ")}`);
-    if (x?.at === undefined && x?.when === undefined) problems.push(`${where} needs "at" (a time) or "when" (a condition)`);
+    const optional = x?.optional === true;
+    if (!optional && x?.at === undefined && x?.when === undefined) problems.push(`${where} needs "at" (a time) or "when" (a condition), or "optional: true" for a facilitator inject`);
+    if (optional && x?.at !== undefined) problems.push(`${where}: an optional inject has no "at". The facilitator decides when to push it.`);
     return {
       id: str(x?.id, `${where}: id`, problems),
-      at: x?.at === undefined ? undefined : parseDuration(x.at, `${where}: at`, problems),
+      at: x?.at === undefined || optional ? undefined : parseDuration(x.at, `${where}: at`, problems),
       when: typeof x?.when === "string" ? x.when : undefined,
+      optional: optional || undefined,
+      note: typeof x?.note === "string" ? x.note.trim() : undefined,
       from: str(x?.from, `${where}: from`, problems),
       via,
       subject: str(x?.subject, `${where}: subject`, problems),

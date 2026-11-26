@@ -1,4 +1,5 @@
 import { tailorSummary } from "./load.js";
+import { genericInjects } from "./facilitator.js";
 import { Sim, type LogEntry } from "./engine.js";
 import { identifiers, parse } from "./expr.js";
 import { clockLabel, elapsedLabel } from "./clock.js";
@@ -355,6 +356,17 @@ export function mselMarkdown(flow: Flow): string {
     for (const t of traps) out.push(`- **${t.title}:** ${s.actions.find((a) => a.id === t.id)?.lesson?.replace(/\s+/g, " ").trim() ?? t.detail}`);
     out.push("");
   }
+  const own = s.injects.filter((i) => i.optional);
+  out.push("## Optional injects for the facilitator");
+  out.push("");
+  out.push("These are only delivered if you push them. Use them to add pressure, test a seat that is quiet, or slow down a team that is moving too fast.");
+  out.push("");
+  out.push("| Inject | Via | From | Use it when | Can be pushed |");
+  out.push("| --- | --- | --- | --- | --- |");
+  for (const i of [...own, ...genericInjects(s)]) {
+    out.push(`| ${cell(i.subject)} | ${CHANNEL_LABELS[i.via]} | ${cell(i.from)} | ${cell(i.note ?? "")} | ${i.when ? cell(readableCondition(s, i.when)) : "Any time"} |`);
+  }
+  out.push("");
   return out.join("\n");
 }
 

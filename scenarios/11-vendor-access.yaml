@@ -100,6 +100,27 @@ injects:
       They do part of it remotely. If their access is off, can we still go
       ahead? Postponing means a second outage next month.
 
+  - id: opt_vendor_statement
+    optional: true
+    when: not vendor_called
+    note: Tests what the team does when the supplier's public line contradicts what they see.
+    from: "{{vendor}} press office"
+    via: news
+    subject: "{{vendor}} says there was no breach"
+    body: "{{vendor}} has published a statement saying its remote support platform has not been compromised and customers need take no action."
+
+  - id: opt_overhaul_due
+    optional: true
+    when: vendor_disabled
+    note: Tests whether the team has a safe way to let the vendor work again.
+    from: Station supervisor
+    via: call
+    subject: The overhaul starts tomorrow
+    body: |
+      "The CS-5 compressor overhaul starts tomorrow at seven. The vendor engineer
+      needs remote access to the control system to do it. If we cancel, we lose
+      the slot for three months."
+
 actions:
   - id: disable_vendor
     group: contain

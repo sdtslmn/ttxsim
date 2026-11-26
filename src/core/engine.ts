@@ -1,4 +1,5 @@
 import { evaluate, isTrue, parse, type Node, type Value } from "./expr.js";
+import { genericInjects, type Decision, type Member, type VoteOption } from "./facilitator.js";
 import { GROUPS, type Action, type Effects, type Group, type Inject, type Objective, type Phase, type Scenario, type StatusItem, type TextVariant, type Tone } from "./types.js";
 
 export const NOT_YET = 99999;
@@ -58,6 +59,13 @@ export class Sim {
   phases: { phase: Phase; time: number }[] = [];
   /** Player or team notes, by phase id. */
   notes: Record<string, string> = {};
+  /** Team mode: who is playing which seat. Empty for solo play. */
+  team: Member[] = [];
+  /** Team mode: decisions with who made them, why, and any vote. */
+  decisions: Decision[] = [];
+  /** Injects the facilitator pushed, in order. */
+  pushed: { time: number; id: string; subject: string; custom: boolean }[] = [];
+  private customCount = 0;
   private fired = new Set<string>();
   private cache = new Map<string, Node>();
   private pending: LogEntry[] = [];
@@ -144,6 +152,66 @@ export class Sim {
     return { ok: true, action, text, events: this.log.slice(logStart) };
   }
 
+  /**
+   * Take an action as a team decision, recording who decided, why, and the vote if there was one.
+   * The decision is logged at the time it was made, before the action's own time passes.
+   */
+  decide(ref: string, meta: { by?: string; rationale?: string; vote?: VoteOption[] } = {}): ActResult {
+    const at = this.time;
+    const r = this.act(ref);
+    if (r.action) {
+      this.decisions.push({
+        time: at,
+        action: r.action.id,
+        label: r.action.label,
+        by: meta.by?.trim() || undefined,
+        rationale: meta.rationale?.trim() || undefined,
+        vote: meta.vote?.length ? meta.vote : undefined,
+      });
+    }
+    return r;
+  }
+
+  /** Optional injects the facilitator can push now: the scenario's own, then the generic ones. */
+  pushable(): Inject[] {
+    if (this.ended) return [];
+    const own = this.scenario.injects.filter((i) => i.optional && !this.done.has(i.id) && this.test(i.when));
+    const generic = genericInjects(this.scenario).filter((i) => !this.done.has(i.id));
+    return [...own, ...generic];
+  }
+
+  /** Facilitator: deliver an optional inject now. */
+  push(id: string): LogEntry[] {
+    const inj = this.pushable().find((i) => i.id === id);
+    if (!inj) return [];
+    return this.pushInject(inj, false);
+  }
+
+  /** Facilitator: send a message written on the spot. It has no effect on the score. */
+  pushCustom(from: string, subject: string, body: string, via: Inject["via"] = "chat"): LogEntry[] {
+    if (this.ended || !subject.trim()) return [];
+    this.customCount += 1;
+    const inj: Inject = {
+      id: `facilitator_${this.customCount}`,
+      from: from.trim() || "Facilitator",
+      via,
+      subject: subject.trim(),
+      body: [{ text: body.trim() || subject.trim() }],
+      effects: { set: [], clear: [], meters: {}, inject: [] },
+      optional: true,
+    };
+    return this.pushInject(inj, true);
+  }
+
+  private pushInject(inj: Inject, custom: boolean): LogEntry[] {
+    const logStart = this.log.length;
+    this.pushed.push({ time: this.time, id: inj.id, subject: inj.subject, custom });
+    this.deliver(inj);
+    this.settle();
+    this.flush();
+    return this.log.slice(logStart);
+  }
+
   /** Let time pass. With no argument, wait until something new arrives (at most 60 minutes). */
   wait(minutes?: number): LogEntry[] {
     if (this.ended) return [];
@@ -202,6 +270,7 @@ export class Sim {
 
   private deliverDue(): void {
     for (const inj of this.scenario.injects) {
+      if (inj.optional) continue;
       if (inj.at !== undefined && inj.at <= this.time && !this.done.has(inj.id) && this.test(inj.when)) this.deliver(inj);
     }
     for (const ph of this.scenario.phases) {
@@ -238,7 +307,7 @@ export class Sim {
       let changed = false;
       for (const inj of this.scenario.injects) {
         if (this.ended) break;
-        if (inj.at === undefined && !this.done.has(inj.id) && this.test(inj.when)) {
+        if (!inj.optional && inj.at === undefined && !this.done.has(inj.id) && this.test(inj.when)) {
           this.deliver(inj);
           changed = true;
         }
@@ -328,8 +397,9 @@ export class Sim {
 }
 
 /** Play a scenario's solution (or any list of steps). Used by tests and the validator. */
-export function runSteps(scenario: Scenario, steps: string[]): Sim {
+export function runSteps(scenario: Scenario, steps: string[], prepare?: (sim: Sim) => void): Sim {
   const sim = new Sim(scenario);
+  prepare?.(sim);
   for (const step of steps) {
     if (sim.ended) break;
     const w = /^wait(?:\s+(\S+))?$/.exec(step);
