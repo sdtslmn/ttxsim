@@ -17,7 +17,13 @@ import {
   applyTailoring,
   parseTailorArgs,
   tailorSummary,
+  variantSummary,
+  hasVariation,
+  randomSeed,
   DEFAULT_ROLES,
+  requestFeedback,
+  feedbackMarkdown,
+  AI_MODEL,
   memberLabel,
   roleLabel,
   type Member,
@@ -97,6 +103,8 @@ function listScenarios(): void {
 }
 
 let pendingTeam: Member[] = [];
+let lastFeedback: string | undefined;
+let promptAgain: (() => void) | undefined;
 
 /** Read "by=lead because we have to" from the words after an action. */
 function decisionMeta(rest: string[]): { by?: string; rationale?: string } {
@@ -115,6 +123,7 @@ function decisionMeta(rest: string[]): { by?: string; rationale?: string } {
 }
 
 function start(s: Scenario): void {
+  lastFeedback = undefined;
   sim = new Sim(s);
   sim.team = pendingTeam;
   reported = false;
@@ -133,6 +142,7 @@ function start(s: Scenario): void {
   if (setup.length) {
     say(c.dim(`Setup: ${setup.map((t) => `${t.label}: ${t.value}`).join("; ")}. Type setup to see what you can change.`));
   }
+  if (s.seed !== undefined) say(c.dim(`This scenario changes from run to run. This is run ${s.seed}; play it again with run=${s.seed}.`));
   say(c.dim(`The exercise starts at ${clockLabel(s, 0)} and runs for up to ${duration(s.limit)}.`));
   say(c.dim(`Useful commands: inbox, read, actions, do <n>, wait, status, log, help.`));
   say();
@@ -299,7 +309,7 @@ function writeReport(file?: string): void {
     return;
   }
   const out = resolve(file ?? `ttxsim-report-${sim.scenario.id}.md`);
-  writeFileSync(out, reportMarkdown(sim));
+  writeFileSync(out, reportMarkdown(sim) + (lastFeedback ? feedbackMarkdown(lastFeedback) : ""));
   reported = true;
   say(`Saved ${out}`);
 }
@@ -315,6 +325,7 @@ function showMap(s: Scenario): void {
   const flow = buildFlow(s);
   const overlay = sim && sim.scenario.id === s.id && sim.ended ? overlayPath(flow, sim) : undefined;
   say(rule(`Scenario map: ${s.title}`));
+  if (s.seed !== undefined) say(c.dim(`Run ${s.seed}: ${variantSummary(s).map((v) => `${v.label.toLowerCase()} ${v.value}`).join("; ")}. Use run=${s.seed} with play or msel for the same run.`));
   say(c.dim(overlay ? "Your path is marked: ✔ you did it, ✘ you missed it, ! it happened to you." : "Spoilers: this is the model response, with traps and the consequences of skipping steps."));
   say();
   for (const step of flow.steps) {
@@ -333,10 +344,11 @@ function showMap(s: Scenario): void {
 }
 
 function writeMsel(s: Scenario, file?: string): void {
-  const out = resolve(file ?? `ttxsim-msel-${s.id}.md`);
+  const out = resolve(file ?? `ttxsim-msel-${s.id}${s.seed !== undefined ? `-run${s.seed}` : ""}.md`);
   const flow = buildFlow(s);
   writeFileSync(out, out.endsWith(".csv") ? mselCsv(flow) : mselMarkdown(flow));
   say(`Saved ${out}`);
+  if (s.seed !== undefined) say(c.dim(`This MSEL is for run ${s.seed}. Start the exercise with run=${s.seed} so players get the same run.`));
 }
 
 function help(): void {
@@ -363,6 +375,7 @@ ${c.bold("During an exercise")}
 
 ${c.bold("After an exercise")}
   report [file]          save a Markdown after-action report
+  feedback               optional AI feedback on your notes (needs ANTHROPIC_API_KEY)
   map                    show the scenario map with your path marked
   next                   start the next scenario
 
@@ -389,27 +402,45 @@ function words(line: string): string[] {
 
 /** Apply key=value settings to a scenario, or print what is wrong and return undefined. */
 function tailored(s: Scenario, settings: string[]): Scenario | undefined {
-  if (!settings.length) return s;
-  const { values, problems } = parseTailorArgs(s, settings);
+  const seedWord = settings.find((w) => /^(seed|run)=/.test(w));
+  const rest = settings.filter((w) => w !== seedWord);
+  let seed: number | undefined;
+  if (seedWord) {
+    seed = Number(seedWord.split("=")[1]);
+    if (!Number.isInteger(seed) || seed < 0) {
+      say(c.red("The run number must be a whole number, for example run=4821."));
+      return undefined;
+    }
+  }
+  if (!rest.length && seed === undefined && !hasVariation(s)) return s;
+  const { values, problems } = parseTailorArgs(s, rest);
   if (problems.length) {
     for (const p of problems) say(c.red(p));
     return undefined;
   }
-  return applyTailoring(s, values);
+  return applyTailoring(s, values, hasVariation(s) ? (seed ?? randomSeed()) : undefined);
 }
 
-/** The key=value words that reproduce a scenario's non-default settings. */
+/** The key=value words that reproduce a scenario's settings and run. */
 function settingArgs(s: Scenario): string {
-  return tailorSummary(s)
-    .filter((t) => t.changed)
-    .map((t) => `${t.id}=${/\s/.test(t.value) ? `"${t.value}"` : t.value}`)
-    .join(" ");
+  return [
+    ...tailorSummary(s)
+      .filter((t) => t.changed)
+      .map((t) => `${t.id}=${/\s/.test(t.value) ? `"${t.value}"` : t.value}`),
+    ...(s.seed !== undefined ? [`run=${s.seed}`] : []),
+  ].join(" ");
 }
 
 function showSetup(s: Scenario): void {
   const fields = tailorSummary(s);
   const n = scenarios.findIndex((x) => x.id === s.id) + 1;
   say(rule(`Setup: ${s.title}`));
+  const groups = (s.template ?? s).variants;
+  if (hasVariation(s)) {
+    say(`This scenario changes from run to run${groups.length ? `: ${groups.map((g) => g.label.toLowerCase()).join(", ")}` : ""}, and some messages may or may not arrive.`);
+    say(c.dim(`Each run has a number. Add run=<number> to replay one, for example play ${n || s.id} run=4821.`));
+    say();
+  }
   if (!fields.length) {
     say("This scenario has no settings to change.");
     return;
@@ -500,6 +531,31 @@ function run(line: string): boolean {
         const s = tailored(base, more.filter((w) => w.includes("=")));
         if (s) writeMsel(s, file);
       }
+      return true;
+    }
+    case "feedback": {
+      if (!sim?.ended) {
+        say("Feedback is for a finished exercise. Type end first.");
+        return true;
+      }
+      const key = process.env.ANTHROPIC_API_KEY ?? "";
+      if (!key) {
+        say("Optional AI feedback on your notes and decisions uses your own Anthropic API key.");
+        say(c.dim("Set ANTHROPIC_API_KEY and type feedback again. Your notes, decisions and the scenario summary are sent to the Anthropic API."));
+        return true;
+      }
+      say(c.dim(`Asking ${process.env.TTXSIM_MODEL ?? AI_MODEL} for feedback on your notes and decisions...`));
+      const done = sim;
+      requestFeedback(done, { apiKey: key, model: process.env.TTXSIM_MODEL })
+        .then((text) => {
+          lastFeedback = text;
+          say();
+          say(md(text));
+          say();
+          say(c.dim("Type report to save it with the after-action report."));
+        })
+        .catch((err: Error) => say(c.red(err.message)))
+        .finally(() => promptAgain?.());
       return true;
     }
     case "team": {
@@ -689,6 +745,7 @@ function interactive(first?: Scenario): void {
   if (first) start(first);
   else listScenarios();
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: c.cyan("ttx> ") });
+  promptAgain = () => rl.prompt();
   rl.prompt();
   rl.on("line", (line) => {
     let keep = true;

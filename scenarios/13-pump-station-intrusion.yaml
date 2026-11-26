@@ -16,6 +16,15 @@ tailor:
     type: text
     default: Wadi Crest Water Transmission
 
+variants:
+  - id: device
+    label: What was plugged in
+    options:
+      - id: cellular
+        label: A small router with a cellular modem
+      - id: wifi
+        label: A Wi-Fi bridge whose signal reaches the road
+
 briefing: |
   {{org}} moves treated water from a coastal plant to three cities through
   a pipeline with eleven unmanned pump stations. Each station has a PLC, a
@@ -84,6 +93,7 @@ injects:
 
   - id: vishing_call
     at: 40
+    chance: 70%
     from: Noor Saeed, Control Room Operator
     via: chat
     subject: Karim is asking for door codes
@@ -195,8 +205,8 @@ actions:
     takes: 15
     result:
       - when: pump_tampered
-        text: The device scanned the station, read the pump PLC's registers and wrote a new speed setpoint twice. It talks out over a cellular modem.
-      - text: The device scanned the station and read the pump PLC's registers. It has a cellular modem, so someone can reach it from outside. It stopped when you isolated the link.
+        text: "The device scanned the station, read the pump PLC's registers and wrote a new speed setpoint twice. {{#device_cellular}}It talks out over a cellular modem.{{/device_cellular}}{{#device_wifi}}It runs a Wi-Fi network that reaches the road outside the fence, so someone parked there can use it.{{/device_wifi}}"
+      - text: "The device scanned the station and read the pump PLC's registers. {{#device_cellular}}It has a cellular modem, so someone can reach it from anywhere.{{/device_cellular}}{{#device_wifi}}It runs a Wi-Fi network that reaches the road outside the fence.{{/device_wifi}} It stopped when you isolated the link."
     effects:
       set: [rogue_known]
 
@@ -230,7 +240,7 @@ actions:
     when: seen.police_onsite
     label: With the police present, photograph, bag and remove the device from the cabinet
     takes: 20
-    result: The device, a small cellular router, is photographed in place, removed and handed to the police with a chain of custody form.
+    result: "The device, {{#device_cellular}}a small cellular router{{/device_cellular}}{{#device_wifi}}a Wi-Fi bridge with a long-range antenna{{/device_wifi}}, is photographed in place, removed and handed to the police with a chain of custody form."
     effects:
       set: [device_removed]
 
@@ -378,7 +388,7 @@ attack:
   - tactic: Initial Access
     technique: T0864
     name: Transient Cyber Asset
-    note: A small cellular router is plugged into the station switch, giving remote access from outside.
+    note: "{{#device_cellular}}A small cellular router is plugged into the station switch, giving remote access from anywhere.{{/device_cellular}}{{#device_wifi}}A Wi-Fi bridge is plugged into the station switch, giving access to anyone in range outside the fence.{{/device_wifi}}"
   - tactic: Discovery
     technique: T0846
     name: Remote System Discovery
@@ -451,7 +461,7 @@ solution:
   - isolate_ps7
   - pumps_local
   - warn_control_room
-  - verify_caller
+  - ?verify_caller
   - review_camera
   - monitor_review
   - change_codes

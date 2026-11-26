@@ -65,6 +65,8 @@ export interface Inject {
   optional?: boolean;
   /** Facilitator note: when and why to push an optional inject. */
   note?: string;
+  /** Chance (0 to 1) that this inject is in play for a run. */
+  chance?: number;
   from: string;
   via: Channel;
   subject: string;
@@ -135,6 +137,25 @@ export interface TailorField {
   help?: string;
 }
 
+export interface VariantOption {
+  id: string;
+  label: string;
+  weight: number;
+}
+
+/** One random choice per run. The chosen option switches on the flag group_option. */
+export interface VariantGroup {
+  id: string;
+  label: string;
+  options: VariantOption[];
+}
+
+/** What a run uses: one option per variant group, and whether each chance inject is in play. */
+export interface VariantPlan {
+  choices: Record<string, string>;
+  chances: Record<string, boolean>;
+}
+
 export interface Scenario {
   id: string;
   title: string;
@@ -172,4 +193,10 @@ export interface Scenario {
   initialFlags: string[];
   /** The scenario before tailoring, with {{placeholders}} intact. */
   template?: Scenario;
+  /** Random choices that change from run to run. */
+  variants: VariantGroup[];
+  /** The choices used for this copy, if the scenario varies. */
+  plan?: VariantPlan;
+  /** The run number the plan came from, if it was drawn at random. */
+  seed?: number;
 }

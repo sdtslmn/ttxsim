@@ -1,4 +1,4 @@
-import { tailorSummary } from "./load.js";
+import { tailorSummary, variantSummary } from "./load.js";
 import { memberLabel } from "./facilitator.js";
 import type { Debrief, Sim } from "./engine.js";
 import { clockLabel, duration } from "./clock.js";
@@ -33,6 +33,8 @@ export function reportMarkdown(sim: Sim, when = new Date()): string {
   lines.push(`- **Actions taken:** ${d.actionsTaken}`);
   const setup = tailorSummary(s);
   if (setup.length) lines.push(`- **Setup:** ${setup.map((t) => `${t.label}: ${t.value}`).join("; ")}`);
+  const variation = variantSummary(s);
+  if (variation.length) lines.push(`- **Variation${s.seed !== undefined ? ` (run ${s.seed})` : ""}:** ${variation.map((v) => `${v.label}: ${v.value}`).join("; ")}`);
   lines.push("");
   lines.push(d.endText);
   lines.push("");

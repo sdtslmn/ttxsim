@@ -16,6 +16,15 @@ tailor:
     type: text
     default: Gulfside Power and Water
 
+variants:
+  - id: foothold
+    label: Where the attacker got the hist_sync password
+    options:
+      - id: phish
+        label: From the corporate historian, after a phishing incident
+      - id: vendor_laptop
+        label: From a script on a stolen vendor laptop
+
 briefing: |
   {{org}} runs a combined power and desalination plant. Gas turbines make
   power, and reverse osmosis (RO) trains make drinking water. A plant
@@ -59,11 +68,13 @@ injects:
     at: 10
     from: IT security operations centre
     via: email
-    subject: Phishing incident on the office network
+    subject: "{{#foothold_phish}}Phishing incident on the office network{{/foothold_phish}}{{#foothold_vendor_laptop}}A historian vendor laptop was stolen{{/foothold_vendor_laptop}}"
     body: |
-      FYI, we're working a phishing incident on the office network since
+      {{#foothold_phish}}FYI, we're working a phishing incident on the office network since
       yesterday. One of the compromised machines is **IT-HIST-02**, the
-      corporate historian, which has a new scheduled task. We didn't think it
+      corporate historian, which has a new scheduled task.{{/foothold_phish}}{{#foothold_vendor_laptop}}FYI, the historian vendor told us this morning that one of their
+      engineers' laptops was stolen last week. It had a maintenance script
+      with the **hist_sync** password in it.{{/foothold_vendor_laptop}} We didn't think it
       affected the plant.
 
   - id: new_account
@@ -90,6 +101,7 @@ injects:
 
   - id: ops_question
     at: 60
+    chance: 70%
     when: replication_cut
     from: Hessa Al Mansoori, Operations Manager
     via: call
@@ -135,7 +147,7 @@ injects:
     from: IT security operations centre
     via: chat
     subject: Is cutting the link really needed?
-    body: Honestly, cutting the historian link feels like an overreaction. We've contained the phishing on our side. Can you put it back so our monitoring works again?
+    body: "Honestly, cutting the historian link feels like an overreaction. {{#foothold_phish}}We've contained the phishing on our side.{{/foothold_phish}}{{#foothold_vendor_laptop}}Nothing on our side looks compromised.{{/foothold_vendor_laptop}} Can you put it back so our monitoring works again?"
 
 actions:
   - id: cut_replication
@@ -380,7 +392,7 @@ attack:
   - tactic: Lateral Movement
     technique: T0859
     name: Valid Accounts
-    note: hist_sync has the same password in both domains. The attacker takes it from the compromised corporate historian.
+    note: "hist_sync has the same password in both domains. {{#foothold_phish}}The attacker takes it from the compromised corporate historian.{{/foothold_phish}}{{#foothold_vendor_laptop}}The attacker finds it in a script on a stolen vendor laptop.{{/foothold_vendor_laptop}}"
   - tactic: Lateral Movement
     technique: T0886
     name: Remote Services

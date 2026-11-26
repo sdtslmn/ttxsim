@@ -21,6 +21,15 @@ tailor:
     default: true
     help: Without it, only the operator stands between a setpoint change and the water.
 
+variants:
+  - id: entry
+    label: How the attacker reaches the HMI
+    options:
+      - id: remote_tool
+        label: A remote desktop tool on the HMI with a shared password
+      - id: old_vpn
+        label: A former integrator's VPN account that was never removed
+
 briefing: |
   {{org}} treats and supplies drinking water to 22,000
   people. Sodium hydroxide is dosed to control pH. The dosing pumps have a
@@ -28,8 +37,10 @@ briefing: |
   no automatic cutout on high pH: operators watch the readings{{/ph_alarm}}.
 
   Treated water spends about a day in the reservoir and mains before it
-  reaches homes. Staff use a remote desktop tool, installed on the HMI
-  computer, to check the plant from home. They share one password.
+  reaches homes. {{#entry_remote_tool}}Staff use a remote desktop tool, installed on the HMI
+  computer, to check the plant from home. They share one password.{{/entry_remote_tool}}{{#entry_old_vpn}}Staff check the plant from home over a VPN to the
+  HMI computer. The integrator who built the system had a VPN account too.
+  Their contract ended last year.{{/entry_old_vpn}}
 
 meters:
   safety:
@@ -59,7 +70,8 @@ injects:
       "This is going to sound mad. Two minutes ago the mouse on the HMI started
       moving by itself. Someone opened the sodium hydroxide screen and changed
       the setpoint from 100 to 11,100 ppm, then disconnected. I put it straight
-      back to 100. I think someone used the remote desktop thing."
+      back to 100. {{#entry_remote_tool}}I think someone used the remote desktop thing.{{/entry_remote_tool}}{{#entry_old_vpn}}The VPN light on the router is on, and none of us is
+      logged in.{{/entry_old_vpn}}"
 
   - id: greg_chat
     at: 10
@@ -97,6 +109,7 @@ injects:
 
   - id: social_post
     at: 120
+    chance: 60%
     from: Local community group
     via: news
     subject: '"Did someone hack the water plant?"'
@@ -150,11 +163,12 @@ actions:
   - id: export_logs
     group: investigate
     when: not did.uninstall_remote
-    label: Export the remote tool's connection log and the HMI audit trail
+    label: "Export the {{#entry_remote_tool}}remote tool's connection log{{/entry_remote_tool}}{{#entry_old_vpn}}VPN connection log{{/entry_old_vpn}} and the HMI audit trail"
     takes: 15
     result: |
-      The log shows two incoming sessions today from an ID nobody recognizes,
-      using the shared password. The HMI audit trail records the setpoint
+      {{#entry_remote_tool}}The log shows two incoming sessions today from an ID nobody recognizes,
+      using the shared password.{{/entry_remote_tool}}{{#entry_old_vpn}}The log shows two VPN sessions today from an address abroad, using
+      the integrator's old account.{{/entry_old_vpn}} The HMI audit trail records the setpoint
       change at 13:30.
     effects:
       set: [logs_exported]
@@ -162,9 +176,9 @@ actions:
   - id: disable_remote
     group: contain
     when: not remote_disabled
-    label: Stop the remote desktop tool on all plant computers and block it at the firewall
+    label: "{{#entry_remote_tool}}Stop the remote desktop tool on all plant computers and block it at the firewall{{/entry_remote_tool}}{{#entry_old_vpn}}Disable the integrator's VPN account and block VPN access to the HMI at the firewall{{/entry_old_vpn}}"
     takes: 5
-    result: The tool is stopped and blocked on every plant computer. Its logs are left in place.
+    result: "{{#entry_remote_tool}}The tool is stopped and blocked on every plant computer.{{/entry_remote_tool}}{{#entry_old_vpn}}The account is disabled and the HMI can no longer be reached over the VPN.{{/entry_old_vpn}} Its logs are left in place."
     effects:
       set: [remote_disabled]
       spread: -20
@@ -172,20 +186,20 @@ actions:
   - id: uninstall_remote
     group: contain
     when: not remote_disabled
-    label: Uninstall the remote desktop tool from every plant computer
+    label: "{{#entry_remote_tool}}Uninstall the remote desktop tool from every plant computer{{/entry_remote_tool}}{{#entry_old_vpn}}Factory-reset the VPN router to wipe all remote access{{/entry_old_vpn}}"
     takes: 5
-    result: The tool is gone, and its connection logs went with it.
+    result: "{{#entry_remote_tool}}The tool is gone, and its connection logs went with it.{{/entry_remote_tool}}{{#entry_old_vpn}}The router is reset, and its connection logs went with it.{{/entry_old_vpn}}"
     effects:
       set: [remote_disabled]
       spread: -20
       evidence: -40
     lesson: |
-      Uninstalling removed the logs investigators needed. Stop and block the
-      tool first, export the logs, then remove it.
+      That wiped the logs investigators needed. Block the access first,
+      export the logs, then clean up.
 
   - id: change_passwords
     group: contain
-    label: Change the shared remote access password and every HMI account password
+    label: Change every remote access password and every HMI account password
     takes: 20
     result: Every plant account has a new, unique password.
     effects:
@@ -199,7 +213,7 @@ actions:
     result: |
       The plant network is flat. The HMI computer can reach the internet
       directly, and one control room PC still runs an unsupported operating
-      system. There is no firewall rule limiting remote tools.
+      system. There is no firewall rule limiting remote access.
     effects:
       set: [exposure_known]
 
@@ -248,7 +262,7 @@ actions:
     when: remote_disabled
     label: Set up a supervised remote access method with individual accounts and MFA for on-call staff
     takes: 30
-    result: On-call staff get individual accounts with MFA through a gateway that logs every session. The shared remote tool stays off.
+    result: On-call staff get individual accounts with MFA through a gateway that logs every session. The old way in stays closed.
     effects:
       set: [secure_remote]
 
@@ -292,8 +306,8 @@ objectives:
   - text: Close the remote door within the hour
     pass: (did.disable_remote and at.disable_remote <= 60) or (did.uninstall_remote and at.uninstall_remote <= 60)
     weight: 3
-    hit: You shut the remote tool down quickly, so the attacker couldn't come back.
-    miss: The remote tool stayed open and the attacker came back.
+    hit: You closed the way in quickly, so the attacker couldn't come back.
+    miss: The way in stayed open and the attacker came back.
 
   - text: Keep the logs investigators will need
     pass: logs_exported
@@ -338,14 +352,15 @@ phases:
     text: |
       Looking back:
 
-      - Six months ago a council IT review recommended removing the remote
-        desktop tool. It stayed because on-call staff rely on it.
-      - The shared password is on a sticky note in the control room and hasn't
-        changed since the tool was installed.
+      - Six months ago a council IT review recommended tightening remote
+        access to the plant. Nothing changed because on-call staff rely on it.
+      - {{#entry_remote_tool}}The shared password is on a sticky note in the control room and hasn't
+        changed since the tool was installed.{{/entry_remote_tool}}{{#entry_old_vpn}}Nobody has a list of who holds a VPN account. Leavers are
+        removed when someone remembers.{{/entry_old_vpn}}
       - Last week an operator said the HMI "logged itself out" overnight. Nobody
         followed it up.
     questions:
-      - Who knew the remote tool was a risk, and why did it stay?
+      - Who knew this remote access was a risk, and why did it stay?
       - Would your operators report a moving mouse or an odd logout? Who would they call on a Friday afternoon?
 
   - id: closing_door
@@ -353,7 +368,7 @@ phases:
     when: did.disable_remote or did.uninstall_remote or time >= 30
     questions:
       - Who has the authority to cut remote access that on-call staff depend on?
-      - How do you cover the plant at night without the remote tool?
+      - How do you cover the plant at night without remote access?
       - Which safeguards stopped harm today (pump limit, pH alarm, the operator), and which would you not want to rely on?
 
   - id: public_health
@@ -397,11 +412,11 @@ attack:
   - tactic: Initial Access
     technique: T0822
     name: External Remote Services
-    note: A remote desktop tool on the HMI computer, reachable from the internet.
+    note: "{{#entry_remote_tool}}A remote desktop tool on the HMI computer, reachable from the internet.{{/entry_remote_tool}}{{#entry_old_vpn}}The plant VPN, through an account that should have been removed.{{/entry_old_vpn}}"
   - tactic: Persistence
     technique: T0859
     name: Valid Accounts
-    note: One shared password, used by every member of staff and never changed.
+    note: "{{#entry_remote_tool}}One shared password, used by every member of staff and never changed.{{/entry_remote_tool}}{{#entry_old_vpn}}A former integrator's account, never disabled when the contract ended.{{/entry_old_vpn}}"
   - tactic: Execution
     technique: T0823
     name: Graphical User Interface

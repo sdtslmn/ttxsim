@@ -21,7 +21,13 @@ import {
   attackUrl,
   applyTailoring,
   tailorSummary,
+  variantSummary,
+  hasVariation,
+  randomSeed,
   DEFAULT_ROLES,
+  requestFeedback,
+  feedbackMarkdown,
+  AI_MODEL,
   memberLabel,
   type Member,
   type Delivered,
@@ -50,10 +56,14 @@ let view: "home" | "setup" | "play" | "debrief" | "map" = "home";
 let mapScenario: Scenario | undefined;
 let setupScenario: Scenario | undefined;
 let setupTeam = false;
+let setupSeed = 0;
 /** Team play: action ids picked as vote options, while picking. */
 let picking: string[] | undefined;
 let facilOpen = true;
 let presenter = false;
+/** Optional AI feedback. The key lives only in memory for this page. */
+let aiKey = "";
+let aiFeedback: { sim: Sim; text: string } | undefined;
 
 // ---- progress (per browser) ---------------------------------------------------
 
@@ -120,9 +130,17 @@ function saveSeats(seats: Seat[]): void {
   }
 }
 
-/** A built-in scenario with the settings last used in this browser. */
+/** A run number given in the address, as ?run=4821. */
+function urlRun(): number | undefined {
+  const v = new URLSearchParams(location.search).get("run") ?? new URLSearchParams(location.search).get("seed");
+  return v && /^\d+$/.test(v) ? Number(v) : undefined;
+}
+
+/** A built-in scenario with the settings last used in this browser, and a run number if it varies. */
 function withSaved(s: Scenario): Scenario {
-  return s.tailor.length ? applyTailoring(s, savedSettings(s.id)) : s;
+  const varies = hasVariation(s);
+  if (!s.tailor.length && !varies) return s;
+  return applyTailoring(s, savedSettings(s.id), varies ? (urlRun() ?? randomSeed()) : undefined);
 }
 
 function indexOfId(s: Scenario): number {
@@ -131,13 +149,14 @@ function indexOfId(s: Scenario): number {
 
 /** Play goes through the setup screen when a scenario has settings, or for team play. */
 function begin(s: Scenario, team = false): void {
-  if (team || (s.template ?? s).tailor.length) openSetup(s, team);
+  if (team || (s.template ?? s).tailor.length || hasVariation(s)) openSetup(s, team);
   else startScenario(s);
 }
 
 function setupLine(s: Scenario): string {
   const changed = tailorSummary(s).filter((t) => t.changed);
-  return changed.length ? `Setup: ${changed.map((t) => `${t.label}: ${t.value}`).join("; ")}` : "";
+  const parts = [changed.length ? `Setup: ${changed.map((t) => `${t.label}: ${t.value}`).join("; ")}` : "", s.seed !== undefined ? `Run ${s.seed}` : ""];
+  return parts.filter(Boolean).join(" · ");
 }
 
 // ---- helpers --------------------------------------------------------------------
@@ -726,6 +745,7 @@ function twoStep(button: HTMLButtonElement, prompt: string, run: () => void): vo
 function openSetup(s: Scenario, team = false): void {
   setupScenario = s;
   setupTeam = team;
+  setupSeed = s.seed ?? urlRun() ?? randomSeed();
   history.replaceState(null, "", `#setup/${s.id}`);
   setView("setup");
 }
@@ -766,6 +786,13 @@ function renderSetup(): string {
             )
             .join("")}
         </div>
+        ${
+          hasVariation(s)
+            ? `<h3 class="setup-h">Run number</h3>
+        <p class="muted small">This scenario changes from run to run${(s.template ?? s).variants.length ? `: ${esc((s.template ?? s).variants.map((g) => g.label.toLowerCase()).join(", "))}` : ""}, and some messages may or may not arrive. Give another group the same number to give them the same run.</p>
+        <div class="runrow"><input type="number" name="run" value="${setupSeed}" min="0" max="999999" aria-label="Run number" /><button type="button" class="btn small ghost" data-newrun>New number</button></div>`
+            : ""
+        }
         ${fields.length ? `<h3 class="setup-h">Tailor the scenario</h3><p class="muted small">Names appear in the briefing and messages. Yes or no settings change what you have to work with, and the scenario plays out differently.</p>${rows}` : ""}
         <div class="debrief-actions">
           <button type="submit" class="btn primary">Start the exercise</button>
@@ -803,7 +830,9 @@ function readSetup(): Scenario {
     values[f.id] = f.type === "toggle" ? el.checked : el.value.trim();
   }
   if (scenarios.some((x) => x.id === s.id)) saveSettings(s.id, values);
-  return applyTailoring(s, values);
+  const run = Number((form.elements.namedItem("run") as HTMLInputElement | null)?.value);
+  if (hasVariation(s)) setupSeed = Number.isInteger(run) && run >= 0 ? run : randomSeed();
+  return applyTailoring(s, values, hasVariation(s) ? setupSeed : undefined);
 }
 
 function bindSetup(): void {
@@ -825,6 +854,10 @@ function bindSetup(): void {
     }),
   );
   app.querySelector("[data-setup-map]")?.addEventListener("click", () => openMap(readSetup()));
+  app.querySelector("[data-newrun]")?.addEventListener("click", () => {
+    const input = app.querySelector<HTMLInputElement>('input[name="run"]');
+    if (input) input.value = String(randomSeed());
+  });
   app.querySelector("[data-reset]")?.addEventListener("click", () => {
     setupTeam = (app.querySelector<HTMLInputElement>('input[name="mode"]:checked')?.value ?? "solo") === "team";
     setupScenario = applyTailoring(setupScenario!, {});
@@ -871,6 +904,7 @@ function renderMap(): string {
         <button class="btn ghost" data-home>All scenarios</button>
       </div>
     </section>
+    ${variationHtml(s)}
     <section class="block">${renderFlow(flow)}</section>
     ${phasesGuideHtml(s)}
     ${attackHtml(s)}
@@ -946,7 +980,8 @@ function renderDebrief(): string {
     </section>
     <div class="debrief-actions">
       <button class="btn primary" data-report>Download after-action report</button>
-      <button class="btn" data-retry>Try again</button>
+      <button class="btn" data-retry>Try again${s.seed !== undefined ? " (same run)" : ""}</button>
+      ${s.seed !== undefined ? `<button class="btn" data-newrun-retry>Try a new run</button>` : ""}
       ${next ? `<button class="btn" data-next>Next: ${esc(next.title)}</button>` : ""}
       <button class="btn ghost" data-map>Scenario map and MSEL</button>
       <button class="btn ghost" data-home>All scenarios</button>
@@ -959,12 +994,31 @@ function renderDebrief(): string {
     ${attackHtml(s)}
     ${notesHtml()}
     <section class="block"><h3>Your path against the model path</h3>${renderFlow(buildFlow(s), overlayPath(buildFlow(s), sim!))}</section>
+    ${aiHtml()}
     <section class="block hotwash"><h3>Hot wash questions for your team</h3><ul>
       <li>What did we know at each decision point, and what did we assume?</li>
       <li>Which decision would we make differently, and what would have told us sooner?</li>
       <li>Does our real incident response plan cover this situation? Who owns each gap?</li>
     </ul></section>
   </main>`;
+}
+
+function aiHtml(): string {
+  const done = aiFeedback && aiFeedback.sim === sim ? aiFeedback.text : "";
+  return `<section class="block ai"><details ${done ? "open" : ""}>
+    <summary>Optional: AI feedback on your notes and decisions</summary>
+    <p class="muted small">This sends the scenario summary, your timeline, decisions and discussion notes to the Anthropic API with your own API key, and asks ${esc(AI_MODEL)} for feedback. The key stays in this page while it is open and is never saved or sent anywhere else. Nothing is sent unless you press the button.</p>
+    <div class="airow"><input type="password" id="ai-key" value="${esc(aiKey)}" placeholder="Anthropic API key" autocomplete="off" spellcheck="false" aria-label="Anthropic API key" /><button class="btn" data-ai>${done ? "Ask again" : "Get feedback"}</button></div>
+    <div id="ai-out" class="ai-out">${done ? `<div class="text">${md(done)}</div><p class="muted small">Written by Claude. Treat it as a second opinion for the hot wash, not a verdict. It is included when you download the report.</p>` : ""}</div>
+  </details></section>`;
+}
+
+function variationHtml(s: Scenario): string {
+  const v = variantSummary(s);
+  if (!v.length) return "";
+  return `<section class="block"><h3>Variation in this run${s.seed !== undefined ? ` (run ${s.seed})` : ""}</h3>
+    <ul class="variation">${v.map((x) => `<li>${esc(x.label)}: <strong>${esc(x.value)}</strong></li>`).join("")}</ul>
+    <p class="muted small">Start the exercise from this page, or with the same run number, so players get this run.</p></section>`;
 }
 
 function teamHtml(): string {
@@ -1020,11 +1074,34 @@ function bindDebrief(): void {
     }),
   );
   app.querySelector("[data-retry]")?.addEventListener("click", () => startScenario(sim!.scenario, sim!.team));
+  app.querySelector("[data-newrun-retry]")?.addEventListener("click", () => startScenario(applyTailoring(sim!.scenario, sim!.scenario.tailored, randomSeed()), sim!.team));
   app.querySelector("[data-next]")?.addEventListener("click", () => {
     const next = scenarios[indexOfId(sim!.scenario) + 1];
     if (next) begin(withSaved(next), sim!.team.length > 0);
   });
-  app.querySelector("[data-report]")?.addEventListener("click", () => download(`ttxsim-report-${sim!.scenario.id}.md`, reportMarkdown(sim!), "text/markdown"));
+  app.querySelector("[data-report]")?.addEventListener("click", () =>
+    download(`ttxsim-report-${sim!.scenario.id}.md`, reportMarkdown(sim!) + (aiFeedback && aiFeedback.sim === sim ? feedbackMarkdown(aiFeedback.text) : ""), "text/markdown"),
+  );
+  app.querySelector<HTMLButtonElement>("[data-ai]")?.addEventListener("click", async (e) => {
+    const button = e.currentTarget as HTMLButtonElement;
+    const out = app.querySelector<HTMLElement>("#ai-out")!;
+    aiKey = app.querySelector<HTMLInputElement>("#ai-key")?.value.trim() ?? "";
+    if (!aiKey) {
+      out.innerHTML = `<p class="muted">Paste your Anthropic API key first.</p>`;
+      return;
+    }
+    const current = sim!;
+    button.disabled = true;
+    out.innerHTML = `<p class="muted">Asking for feedback...</p>`;
+    try {
+      const text = await requestFeedback(current, { apiKey: aiKey, browser: true });
+      aiFeedback = { sim: current, text };
+      if (sim === current && view === "debrief") render();
+    } catch (err) {
+      out.innerHTML = `<div class="error">${esc((err as Error).message)}</div>`;
+      button.disabled = false;
+    }
+  });
   app.querySelector("[data-map]")?.addEventListener("click", () => openMap(sim!.scenario));
 }
 

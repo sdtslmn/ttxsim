@@ -16,6 +16,17 @@ tailor:
     type: text
     default: Coastal Power Transmission
 
+variants:
+  - id: implant_site
+    label: Where the second implant sits
+    options:
+      - id: n12
+        label: North-12
+      - id: s4
+        label: South-4
+      - id: e15
+        label: East-15
+
 briefing: |
   {{org}} runs the high-voltage grid for a coastal region.
   The control centre's SCADA front-end sends commands to remote terminal units
@@ -99,9 +110,9 @@ injects:
     when: not allowlist and not n12_isolated
     from: OT network monitor
     via: alert
-    subject: "Unexpected IEC-104 commands at North-12"
+    subject: "Unexpected IEC-104 commands at {{implant_site}}"
     body: |
-      The station computer at North-12 has started sending command messages to
+      The station computer at {{implant_site}} has started sending command messages to
       its RTU. Two breakers have opened. This device had been quiet until now.
     effects:
       set: [n12_hit]
@@ -110,6 +121,7 @@ injects:
 
   - id: wiped
     at: 100
+    chance: 50%
     when: not n7_imaged
     from: Station engineer, North-7
     via: call
@@ -252,17 +264,17 @@ actions:
     takes: 45
     result:
       - when: n12_hit
-        text: The same service is on North-12's station computer, which has already acted. Nothing on the others.
-      - text: The same service is sitting dormant on the **North-12** station computer, set to start at 21:00. Nothing on the others.
+        text: The same service is on {{implant_site}}'s station computer, which has already acted. Nothing on the others.
+      - text: The same service is sitting dormant on the **{{implant_site}}** station computer, set to start at 21:00. Nothing on the others.
     effects:
       set: [n12_found]
 
   - id: isolate_n12
     group: contain
     when: n12_found
-    label: Disconnect the North-12 station computer
+    label: Disconnect the {{implant_site}} station computer
     takes: 10
-    result: The North-12 station computer is off the network.
+    result: The {{implant_site}} station computer is off the network.
     effects:
       set: [n12_isolated]
 

@@ -18,6 +18,8 @@ import {
   type Scenario,
   type StatusItem,
   type TailorField,
+  type VariantGroup,
+  type VariantPlan,
   type TextVariant,
   type Tone,
 } from "./types.js";
@@ -155,6 +157,7 @@ export function loadScenario(source: string, file = ""): Scenario {
       when: typeof x?.when === "string" ? x.when : undefined,
       optional: optional || undefined,
       note: typeof x?.note === "string" ? x.note.trim() : undefined,
+      chance: x?.chance === undefined ? undefined : chanceOf(x.chance, where, optional, problems),
       from: str(x?.from, `${where}: from`, problems),
       via,
       subject: str(x?.subject, `${where}: subject`, problems),
@@ -245,6 +248,18 @@ export function loadScenario(source: string, file = ""): Scenario {
     return { id: str(x?.id, `${where}: id`, problems), label: str(x?.label, `${where}: label`, problems), type: type ?? "text", default: def, help: typeof x?.help === "string" ? x.help.trim() : undefined };
   });
 
+  const variants: VariantGroup[] = list(raw.variants).map((x: any, i) => {
+    const where = `variant ${x?.id ?? i + 1}`;
+    const options = list(x?.options).map((o: any, j) => {
+      const w = o?.weight === undefined ? 1 : Number(o.weight);
+      if (!(w > 0)) problems.push(`${where} option ${o?.id ?? j + 1}: weight must be more than zero`);
+      return { id: str(o?.id, `${where} option ${j + 1}: id`, problems), label: str(o?.label, `${where} option ${o?.id ?? j + 1}: label`, problems), weight: w > 0 ? w : 1 };
+    });
+    if (options.length < 2) problems.push(`${where} needs at least two options`);
+    if (new Set(options.map((o) => o.id)).size !== options.length) problems.push(`${where} uses an option id twice`);
+    return { id: str(x?.id, `${where}: id`, problems), label: str(x?.label, `${where}: label`, problems), options };
+  });
+
   const scenario: Scenario = {
     id: str(raw.id, "id", problems),
     title: str(raw.title, "title", problems),
@@ -274,14 +289,16 @@ export function loadScenario(source: string, file = ""): Scenario {
     tailor,
     tailored: {},
     initialFlags: [],
+    variants,
   };
-  const tailorIds = new Set(tailor.map((t) => t.id));
+  const variantFlags = new Set(variants.flatMap((g) => g.options.map((o) => `${g.id}_${o.id}`)));
+  const known = new Set([...tailor.map((t) => t.id), ...variants.map((g) => g.id), ...variantFlags]);
   for (const m of source.matchAll(/\{\{\s*[#^/]?([A-Za-z0-9_]+)\s*\}\}/g)) {
-    if (!tailorIds.has(m[1])) problems.push(`placeholder {{${m[1]}}} has no matching tailor field`);
+    if (!known.has(m[1])) problems.push(`placeholder {{${m[1]}}} has no matching tailor field or variant`);
   }
   for (const m of source.matchAll(/\{\{[#^]([A-Za-z0-9_]+)\}\}/g)) {
     const f = tailor.find((t) => t.id === m[1]);
-    if (f && f.type !== "toggle") problems.push(`{{#${m[1]}}} sections need a toggle field, but ${m[1]} is text`);
+    if ((f && f.type !== "toggle") || variants.some((g) => g.id === m[1])) problems.push(`{{#${m[1]}}} sections need a yes or no value (a toggle, or a variant option such as group_option), but ${m[1]} is text`);
   }
 
   problems.push(...checkScenario(scenario));
@@ -298,14 +315,26 @@ export function toBool(v: string | boolean): boolean {
  * Fill in {{placeholders}} and switch on toggle flags. Values not given use the
  * field defaults. Works on an already tailored scenario too (it starts from the template).
  */
-export function applyTailoring(s: Scenario, values: Record<string, string | boolean> = {}): Scenario {
+export function applyTailoring(s: Scenario, values: Record<string, string | boolean> = {}, plan?: VariantPlan | number): Scenario {
   const template = s.template ?? s;
   const merged: Record<string, string | boolean> = {};
   for (const f of template.tailor) {
     const v = values[f.id];
     merged[f.id] = f.type === "toggle" ? (v === undefined ? (f.default as boolean) : toBool(v)) : v === undefined || String(v).trim() === "" ? String(f.default) : String(v).trim();
   }
-  if (!template.tailor.length) return { ...template, tailored: {}, initialFlags: [], template };
+  const varies = hasVariation(template);
+  const seed = typeof plan === "number" ? plan : plan === undefined ? s.seed : undefined;
+  const chosen: VariantPlan | undefined = !varies ? undefined : typeof plan === "number" ? planVariants(template, plan) : (plan ?? s.plan ?? defaultPlan(template));
+  const variantFlags: string[] = [];
+  if (chosen) {
+    for (const g of template.variants) {
+      const pick = g.options.find((o) => o.id === chosen.choices[g.id]) ?? g.options[0];
+      merged[g.id] = pick.label;
+      for (const o of g.options) merged[`${g.id}_${o.id}`] = o === pick;
+      variantFlags.push(`${g.id}_${pick.id}`);
+    }
+  }
+  if (!template.tailor.length && !varies) return { ...template, tailored: {}, initialFlags: [], template };
   const { template: _drop, ...plain } = template;
   // {{#flag}}shown when yes{{/flag}} and {{^flag}}shown when no{{/flag}}
   const sections = /\{\{([#^])([A-Za-z0-9_]+)\}\}([\s\S]*?)\{\{\/\2\}\}/g;
@@ -319,9 +348,100 @@ export function applyTailoring(s: Scenario, values: Record<string, string | bool
     return JSON.stringify(typeof v === "boolean" ? (v ? "yes" : "no") : v).slice(1, -1);
   });
   const out = JSON.parse(json) as Scenario;
-  out.tailored = merged;
-  out.initialFlags = template.tailor.filter((f) => f.type === "toggle" && merged[f.id] === true).map((f) => f.id);
+  out.tailored = Object.fromEntries(template.tailor.map((f) => [f.id, merged[f.id]]));
+  out.initialFlags = [...template.tailor.filter((f) => f.type === "toggle" && merged[f.id] === true).map((f) => f.id), ...variantFlags];
   out.template = template;
+  if (chosen) {
+    out.plan = chosen;
+    out.seed = seed;
+    // A chance inject that is out of this run waits in the facilitator's list instead.
+    for (const inj of out.injects) {
+      if (inj.chance !== undefined && chosen.chances[inj.id] === false) {
+        inj.optional = true;
+        inj.at = undefined;
+        inj.note = "Did not come up in this run. Push it if you want it anyway.";
+      }
+    }
+  }
+  return out;
+}
+
+function chanceOf(v: unknown, where: string, optional: boolean, problems: string[]): number | undefined {
+  const n = typeof v === "string" && v.trim().endsWith("%") ? Number(v.trim().slice(0, -1)) / 100 : Number(v);
+  if (!(n > 0 && n < 1)) {
+    problems.push(`${where}: chance must be between 0 and 1 (or a percentage such as 50%)`);
+    return undefined;
+  }
+  if (optional) problems.push(`${where}: an optional inject can't also have a chance`);
+  return n;
+}
+
+/** Does this scenario change from run to run? */
+export function hasVariation(s: Scenario): boolean {
+  const t = s.template ?? s;
+  return t.variants.length > 0 || t.injects.some((i) => i.chance !== undefined);
+}
+
+/** Small seeded random number generator, so a run number always gives the same run. */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A four-digit run number. */
+export function randomSeed(): number {
+  return 1000 + Math.floor(Math.random() * 9000);
+}
+
+/** Draw the choices for a run from its number. */
+export function planVariants(s: Scenario, seed: number): VariantPlan {
+  const t = s.template ?? s;
+  const rnd = mulberry32(seed);
+  const choices: Record<string, string> = {};
+  for (const g of t.variants) {
+    const total = g.options.reduce((n, o) => n + o.weight, 0);
+    let r = rnd() * total;
+    choices[g.id] = (g.options.find((o) => (r -= o.weight) < 0) ?? g.options[g.options.length - 1]).id;
+  }
+  const chances: Record<string, boolean> = {};
+  for (const i of t.injects) if (i.chance !== undefined) chances[i.id] = rnd() < i.chance;
+  return { choices, chances };
+}
+
+/** The plan used when nothing is drawn: first option of each group, every chance inject in play. */
+export function defaultPlan(s: Scenario): VariantPlan {
+  const t = s.template ?? s;
+  return {
+    choices: Object.fromEntries(t.variants.map((g) => [g.id, g.options[0].id])),
+    chances: Object.fromEntries(t.injects.filter((i) => i.chance !== undefined).map((i) => [i.id, true])),
+  };
+}
+
+/** Every possible plan, for the validator. */
+export function allPlans(s: Scenario): VariantPlan[] {
+  const t = s.template ?? s;
+  let plans: VariantPlan[] = [{ choices: {}, chances: {} }];
+  for (const g of t.variants) plans = plans.flatMap((p) => g.options.map((o) => ({ choices: { ...p.choices, [g.id]: o.id }, chances: p.chances })));
+  for (const i of t.injects.filter((x) => x.chance !== undefined)) {
+    plans = plans.flatMap((p) => [true, false].map((v) => ({ choices: p.choices, chances: { ...p.chances, [i.id]: v } })));
+  }
+  return plans;
+}
+
+/** What varied in this run, for reports and MSELs. */
+export function variantSummary(s: Scenario): { label: string; value: string }[] {
+  const t = s.template ?? s;
+  if (!s.plan) return [];
+  const out = t.variants.map((g) => ({ label: g.label, value: g.options.find((o) => o.id === s.plan!.choices[g.id])?.label ?? "" }));
+  for (const i of t.injects.filter((x) => x.chance !== undefined)) {
+    out.push({ label: `Chance message: ${i.subject.replace(/^"|"$/g, "")}`, value: s.plan.chances[i.id] ? "in play" : "not in play this run" });
+  }
   return out;
 }
 
@@ -354,7 +474,11 @@ export function checkScenario(s: Scenario): string[] {
   const meterIds = new Set(s.meters.map((m) => m.id));
   const actionIds = new Set(s.actions.map((a) => a.id));
   const injectIds = new Set(s.injects.map((i) => i.id));
-  const flags = new Set([...s.flags, ...s.tailor.filter((t) => t.type === "toggle").map((t) => t.id)]);
+  const flags = new Set([
+    ...s.flags,
+    ...s.tailor.filter((t) => t.type === "toggle").map((t) => t.id),
+    ...(s.variants ?? []).flatMap((g) => g.options.map((o) => `${g.id}_${o.id}`)),
+  ]);
   const allEffects: [string, Effects][] = [
     ...s.injects.map((i) => [`inject ${i.id}`, i.effects] as [string, Effects]),
     ...s.actions.map((a) => [`action ${a.id}`, a.effects] as [string, Effects]),

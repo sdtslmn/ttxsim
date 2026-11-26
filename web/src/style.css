@@ -1594,3 +1594,60 @@ body.presenter .clock strong {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- variation ---- */
+
+.runrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.runrow input {
+  font: inherit;
+  width: 140px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.variation {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+/* ---- optional AI feedback ---- */
+
+.ai details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 17px;
+}
+
+.airow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.airow input {
+  flex: 1 1 260px;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.ai-out .text h3 {
+  font-size: 15px;
+  margin: 14px 0 6px;
+}
+
+.roster[hidden] {
+  display: none;
+}

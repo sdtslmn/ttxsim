@@ -109,7 +109,7 @@ injects:
   - { id: a, at: 0, from: x, via: email, subject: s, body: b }
   - { id: b, at: 10, optional: true, from: x, via: email, subject: s, body: b }
 actions:
-  - { id: x, group: contain, label: X, takes: 5, result: ok, effects: { meters: { m: -50 } } }
+  - { id: x, group: contain, label: X, takes: 5, result: ok, effects: { m: -50 } }
 objectives:
   - { text: t, pass: did.x, weight: 1, hit: h, miss: m }
 solution: [x]

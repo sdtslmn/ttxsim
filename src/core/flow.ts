@@ -1,4 +1,4 @@
-import { tailorSummary } from "./load.js";
+import { tailorSummary, variantSummary } from "./load.js";
 import { genericInjects } from "./facilitator.js";
 import { Sim, type LogEntry } from "./engine.js";
 import { identifiers, parse } from "./expr.js";
@@ -306,6 +306,15 @@ export function mselMarkdown(flow: Flow): string {
     out.push("## Setup for this exercise");
     out.push("");
     for (const t of setup) out.push(`- ${t.label}: **${t.value}**`);
+  }
+  const variation = variantSummary(s);
+  if (variation.length) {
+    out.push("");
+    out.push(`## Variation in this run${s.seed !== undefined ? ` (run ${s.seed})` : ""}`);
+    out.push("");
+    out.push("This scenario changes from run to run. Players get the same run if you start it with the same run number.");
+    out.push("");
+    for (const v of variation) out.push(`- ${v.label}: **${v.value}**`);
   }
   out.push("");
   out.push("## Objectives");
