@@ -19,6 +19,8 @@ import {
   mselMarkdown,
   overlayPath,
   attackUrl,
+  applyTailoring,
+  tailorSummary,
   type Delivered,
   type LogEntry,
   type Scenario,
@@ -39,8 +41,9 @@ let scenarios: Scenario[] = [];
 let custom: Scenario | undefined;
 let sim: Sim | undefined;
 let reader: Reader = { kind: "briefing" };
-let view: "home" | "play" | "debrief" | "map" = "home";
+let view: "home" | "setup" | "play" | "debrief" | "map" = "home";
 let mapScenario: Scenario | undefined;
+let setupScenario: Scenario | undefined;
 
 // ---- progress (per browser) ---------------------------------------------------
 
@@ -62,6 +65,48 @@ function saveProgress(id: string, score: number): void {
   } catch {
     // Storage can be unavailable (private mode, embedded views). Progress is optional.
   }
+}
+
+// ---- saved setup (per browser) -------------------------------------------------
+
+type Settings = Record<string, string | boolean>;
+
+function savedSettings(id: string): Settings {
+  try {
+    return JSON.parse(localStorage.getItem("ttxsim.setup") ?? "{}")[id] ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSettings(id: string, values: Settings): void {
+  try {
+    const all = JSON.parse(localStorage.getItem("ttxsim.setup") ?? "{}");
+    all[id] = values;
+    localStorage.setItem("ttxsim.setup", JSON.stringify(all));
+  } catch {
+    // Optional: the setup still applies to this run.
+  }
+}
+
+/** A built-in scenario with the settings last used in this browser. */
+function withSaved(s: Scenario): Scenario {
+  return s.tailor.length ? applyTailoring(s, savedSettings(s.id)) : s;
+}
+
+function indexOfId(s: Scenario): number {
+  return scenarios.findIndex((x) => x.id === s.id);
+}
+
+/** Play goes through the setup screen when a scenario has settings. */
+function begin(s: Scenario): void {
+  if ((s.template ?? s).tailor.length) openSetup(s);
+  else startScenario(s);
+}
+
+function setupLine(s: Scenario): string {
+  const changed = tailorSummary(s).filter((t) => t.changed);
+  return changed.length ? `Setup: ${changed.map((t) => `${t.label}: ${t.value}`).join("; ")}` : "";
 }
 
 // ---- helpers --------------------------------------------------------------------
@@ -116,7 +161,7 @@ function renderHome(): string {
               <span class="card-top"><span class="sector">${esc(s.sector)}</span>${badge}</span>
               <span class="card-title">${esc(s.title)}</span>
               <span class="card-summary">${esc(s.summary)}</span>
-              <span class="card-meta">About ${s.minutes} min · ${s.objectives.length} objectives</span>
+              <span class="card-meta">About ${s.minutes} min · ${s.objectives.length} objectives${s.tailor.length ? " · can be tailored" : ""}</span>
             </button>
             <div class="card-foot">
               <button class="btn small primary" data-start="${esc(s.id)}">Play</button>
@@ -158,13 +203,13 @@ function bindHome(): void {
   app.querySelectorAll<HTMLButtonElement>("[data-start]").forEach((b) =>
     b.addEventListener("click", () => {
       const s = scenarios.find((x) => x.id === b.dataset.start);
-      if (s) startScenario(s);
+      if (s) begin(withSaved(s));
     }),
   );
   app.querySelectorAll<HTMLButtonElement>("[data-map]").forEach((b) =>
     b.addEventListener("click", () => {
       const s = scenarios.find((x) => x.id === b.dataset.map);
-      if (s) openMap(s);
+      if (s) openMap(withSaved(s));
     }),
   );
   const input = app.querySelector<HTMLInputElement>("#file");
@@ -174,7 +219,7 @@ function bindHome(): void {
     const box = app.querySelector("#load-error")!;
     try {
       custom = loadScenario(await f.text(), f.name);
-      startScenario(custom);
+      begin(custom);
     } catch (err) {
       const problems = err instanceof ScenarioError ? err.problems : [(err as Error).message];
       box.innerHTML = `<div class="error"><strong>${esc(f.name)} has ${problems.length} problem${problems.length === 1 ? "" : "s"}:</strong><ul>${problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`;
@@ -445,6 +490,81 @@ function twoStep(button: HTMLButtonElement, prompt: string, run: () => void): vo
   }, 4000);
 }
 
+// ---- setup (tailoring) -------------------------------------------------------------
+
+function openSetup(s: Scenario): void {
+  setupScenario = s;
+  history.replaceState(null, "", `#setup/${s.id}`);
+  setView("setup");
+}
+
+function renderSetup(): string {
+  const s = setupScenario!;
+  const fields = (s.template ?? s).tailor;
+  const rows = fields
+    .map((f) => {
+      const v = s.tailored[f.id] ?? f.default;
+      const help = f.help ? `<small>${esc(f.help)}</small>` : "";
+      return f.type === "toggle"
+        ? `<label class="field toggle"><input type="checkbox" name="${esc(f.id)}" ${v === true ? "checked" : ""} /><span><strong>${esc(f.label)}</strong>${help}</span></label>`
+        : `<label class="field"><strong>${esc(f.label)}</strong><input type="text" name="${esc(f.id)}" value="${esc(String(v))}" placeholder="${esc(String(f.default))}" maxlength="80" />${help}</label>`;
+    })
+    .join("");
+  return `
+  <header class="topbar">
+    <button class="brand link" data-home><span class="logo">T</span> TTXSim</button>
+    <div class="scenario-name">${esc(s.title)}: setup</div>
+  </header>
+  <main class="setupview">
+    <section class="setup-box">
+      <h1>${esc(s.title)}</h1>
+      <p class="muted">${esc(s.summary)}</p>
+      <p>Tailor the exercise before you start. Names appear in the briefing and messages. Yes or no settings change what your team has to work with, and the scenario plays out differently.</p>
+      <form id="setup-form">
+        ${rows}
+        <div class="debrief-actions">
+          <button type="submit" class="btn primary">Start the exercise</button>
+          <button type="button" class="btn" data-setup-map title="Contains spoilers">Map and MSEL with these settings</button>
+          <button type="button" class="btn ghost" data-reset>Back to defaults</button>
+          <button type="button" class="btn ghost" data-home>All scenarios</button>
+        </div>
+      </form>
+      <p class="muted small">Settings stay in this browser only.</p>
+    </section>
+  </main>`;
+}
+
+function readSetup(): Scenario {
+  const s = setupScenario!;
+  const form = app.querySelector<HTMLFormElement>("#setup-form")!;
+  const values: Settings = {};
+  for (const f of (s.template ?? s).tailor) {
+    const el = form.elements.namedItem(f.id) as HTMLInputElement | null;
+    if (!el) continue;
+    values[f.id] = f.type === "toggle" ? el.checked : el.value.trim();
+  }
+  if (scenarios.some((x) => x.id === s.id)) saveSettings(s.id, values);
+  return applyTailoring(s, values);
+}
+
+function bindSetup(): void {
+  app.querySelectorAll("[data-home]").forEach((b) =>
+    b.addEventListener("click", () => {
+      history.replaceState(null, "", "#");
+      setView("home");
+    }),
+  );
+  app.querySelector<HTMLFormElement>("#setup-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    startScenario(readSetup());
+  });
+  app.querySelector("[data-setup-map]")?.addEventListener("click", () => openMap(readSetup()));
+  app.querySelector("[data-reset]")?.addEventListener("click", () => {
+    setupScenario = applyTailoring(setupScenario!, {});
+    render();
+  });
+}
+
 // ---- scenario map and MSEL -------------------------------------------------------
 
 function openMap(s: Scenario): void {
@@ -474,11 +594,13 @@ function renderMap(): string {
     <section class="map-intro">
       <h1>${esc(s.title)}</h1>
       <p class="muted">${esc(s.org)}${s.sector ? ` · ${esc(s.sector)}` : ""} · ${esc(s.summary)}</p>
+      ${setupLine(s) ? `<p class="muted">${esc(setupLine(s))}</p>` : ""}
       <p class="spoiler">For facilitators: this map shows the model response, the traps and what happens when steps are skipped. Players should see it after the exercise.</p>
       <div class="debrief-actions">
         <button class="btn primary" data-start="${esc(s.id)}">Play this scenario</button>
         <button class="btn" data-msel-md>Download MSEL (Markdown)</button>
         <button class="btn" data-msel-csv>Download MSEL (CSV for Excel)</button>
+        ${(s.template ?? s).tailor.length ? `<button class="btn ghost" data-change-setup>Change setup</button>` : ""}
         <button class="btn ghost" data-home>All scenarios</button>
       </div>
     </section>
@@ -497,6 +619,7 @@ function bindMap(): void {
     }),
   );
   app.querySelector("[data-start]")?.addEventListener("click", () => startScenario(s));
+  app.querySelector("[data-change-setup]")?.addEventListener("click", () => openSetup(s));
   app.querySelector("[data-msel-md]")?.addEventListener("click", () => download(`ttxsim-msel-${s.id}.md`, mselMarkdown(buildFlow(s)), "text/markdown"));
   app.querySelector("[data-msel-csv]")?.addEventListener("click", () => download(`ttxsim-msel-${s.id}.csv`, mselCsv(buildFlow(s)), "text/csv"));
 }
@@ -513,7 +636,7 @@ function renderDebrief(): string {
   const s = sim!.scenario;
   const d = sim!.debrief();
   const g = grade(d, s);
-  const idx = scenarios.indexOf(s);
+  const idx = indexOfId(s);
   const next = idx >= 0 ? scenarios[idx + 1] : undefined;
   const objectives = d.objectives
     .map(
@@ -550,6 +673,7 @@ function renderDebrief(): string {
       <div>
         <h1>${esc(g)}</h1>
         <p>${esc(d.endText)}</p>
+        ${setupLine(s) ? `<p class="muted">${esc(setupLine(s))}</p>` : ""}
         <p class="muted">Pass mark ${s.passMark}%. You used ${esc(duration(d.time))} of exercise time, ending at ${esc(clockLabel(s, d.time))}, and took ${d.actionsTaken} actions.</p>
       </div>
     </section>
@@ -614,8 +738,8 @@ function bindDebrief(): void {
   );
   app.querySelector("[data-retry]")?.addEventListener("click", () => startScenario(sim!.scenario));
   app.querySelector("[data-next]")?.addEventListener("click", () => {
-    const next = scenarios[scenarios.indexOf(sim!.scenario) + 1];
-    if (next) startScenario(next);
+    const next = scenarios[indexOfId(sim!.scenario) + 1];
+    if (next) begin(withSaved(next));
   });
   app.querySelector("[data-report]")?.addEventListener("click", () => download(`ttxsim-report-${sim!.scenario.id}.md`, reportMarkdown(sim!), "text/markdown"));
   app.querySelector("[data-map]")?.addEventListener("click", () => openMap(sim!.scenario));
@@ -624,7 +748,10 @@ function bindDebrief(): void {
 // ---- main -----------------------------------------------------------------------
 
 function render(): void {
-  if (view === "home" || (!sim && view !== "map")) {
+  if (view === "setup" && setupScenario) {
+    app.innerHTML = renderSetup();
+    bindSetup();
+  } else if (view === "home" || (!sim && view !== "map")) {
     app.innerHTML = renderHome();
     bindHome();
   } else if (view === "map" && mapScenario) {
@@ -647,7 +774,9 @@ try {
 }
 const hash = location.hash.slice(1);
 const mapFromHash = hash.startsWith("map/") ? scenarios.find((s) => s.id === hash.slice(4)) : undefined;
+const setupFromHash = hash.startsWith("setup/") ? scenarios.find((s) => s.id === hash.slice(6)) : undefined;
 const fromHash = scenarios.find((s) => s.id === hash);
-if (mapFromHash) openMap(mapFromHash);
-else if (fromHash) startScenario(fromHash);
+if (mapFromHash) openMap(withSaved(mapFromHash));
+else if (setupFromHash) openSetup(withSaved(setupFromHash));
+else if (fromHash) startScenario(withSaved(fromHash));
 else render();

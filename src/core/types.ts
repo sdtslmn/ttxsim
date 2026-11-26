@@ -123,6 +123,14 @@ export interface AttackStep {
   note?: string;
 }
 
+export interface TailorField {
+  id: string;
+  label: string;
+  type: "text" | "toggle";
+  default: string | boolean;
+  help?: string;
+}
+
 export interface Scenario {
   id: string;
   title: string;
@@ -152,4 +160,12 @@ export interface Scenario {
   attack: AttackStep[];
   /** Which ATT&CK matrix the attack path uses, for links and labels. */
   attackMatrix: "ics" | "enterprise";
+  /** Fields a facilitator can set before play: text placeholders and yes/no toggles. */
+  tailor: TailorField[];
+  /** Values used for this copy of the scenario. */
+  tailored: Record<string, string | boolean>;
+  /** Flags switched on at the start (toggles set to yes). */
+  initialFlags: string[];
+  /** The scenario before tailoring, with {{placeholders}} intact. */
+  template?: Scenario;
 }

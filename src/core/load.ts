@@ -17,6 +17,7 @@ import {
   type Rule,
   type Scenario,
   type StatusItem,
+  type TailorField,
   type TextVariant,
   type Tone,
 } from "./types.js";
@@ -231,6 +232,15 @@ export function loadScenario(source: string, file = ""): Scenario {
     return { tactic: str(x?.tactic, `${where}: tactic`, problems), technique, name: str(x?.name, `${where}: name`, problems), note: typeof x?.note === "string" ? x.note.trim() : undefined };
   });
 
+  const tailor: TailorField[] = list(raw.tailor).map((x: any, i) => {
+    const where = `tailor field ${x?.id ?? i + 1}`;
+    const type = x?.type === "toggle" ? "toggle" : x?.type === "text" || x?.type === undefined ? "text" : null;
+    if (!type) problems.push(`${where}: type must be text or toggle`);
+    const def = type === "toggle" ? x?.default === true : x?.default === undefined ? "" : String(x.default);
+    if (type === "text" && !String(def).trim()) problems.push(`${where} needs a default value`);
+    return { id: str(x?.id, `${where}: id`, problems), label: str(x?.label, `${where}: label`, problems), type: type ?? "text", default: def, help: typeof x?.help === "string" ? x.help.trim() : undefined };
+  });
+
   const scenario: Scenario = {
     id: str(raw.id, "id", problems),
     title: str(raw.title, "title", problems),
@@ -257,11 +267,58 @@ export function loadScenario(source: string, file = ""): Scenario {
     status,
     attack,
     attackMatrix: raw.attack_matrix === "enterprise" ? "enterprise" : "ics",
+    tailor,
+    tailored: {},
+    initialFlags: [],
   };
+  const tailorIds = new Set(tailor.map((t) => t.id));
+  for (const m of source.matchAll(/\{\{\s*[#^/]?([A-Za-z0-9_]+)\s*\}\}/g)) {
+    if (!tailorIds.has(m[1])) problems.push(`placeholder {{${m[1]}}} has no matching tailor field`);
+  }
+  for (const m of source.matchAll(/\{\{[#^]([A-Za-z0-9_]+)\}\}/g)) {
+    const f = tailor.find((t) => t.id === m[1]);
+    if (f && f.type !== "toggle") problems.push(`{{#${m[1]}}} sections need a toggle field, but ${m[1]} is text`);
+  }
 
   problems.push(...checkScenario(scenario));
   if (problems.length) throw new ScenarioError(problems, file || scenario.id);
-  return scenario;
+  return applyTailoring(scenario);
+}
+
+/** Turn "yes", "no", "true", "1" and so on into a boolean. */
+export function toBool(v: string | boolean): boolean {
+  return typeof v === "boolean" ? v : /^(y|yes|true|1|on)$/i.test(v.trim());
+}
+
+/**
+ * Fill in {{placeholders}} and switch on toggle flags. Values not given use the
+ * field defaults. Works on an already tailored scenario too (it starts from the template).
+ */
+export function applyTailoring(s: Scenario, values: Record<string, string | boolean> = {}): Scenario {
+  const template = s.template ?? s;
+  const merged: Record<string, string | boolean> = {};
+  for (const f of template.tailor) {
+    const v = values[f.id];
+    merged[f.id] = f.type === "toggle" ? (v === undefined ? (f.default as boolean) : toBool(v)) : v === undefined || String(v).trim() === "" ? String(f.default) : String(v).trim();
+  }
+  if (!template.tailor.length) return { ...template, tailored: {}, initialFlags: [], template };
+  const { template: _drop, ...plain } = template;
+  // {{#flag}}shown when yes{{/flag}} and {{^flag}}shown when no{{/flag}}
+  const sections = /\{\{([#^])([A-Za-z0-9_]+)\}\}([\s\S]*?)\{\{\/\2\}\}/g;
+  let json = JSON.stringify(plain);
+  for (let i = 0; i < 5 && sections.test(json); i++) {
+    json = json.replace(sections, (_, kind, id, body) => ((merged[id] === true) === (kind === "#") ? body : ""));
+  }
+  json = json.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (whole, id) => {
+    if (!(id in merged)) return whole;
+    const v = merged[id];
+    return JSON.stringify(typeof v === "boolean" ? (v ? "yes" : "no") : v).slice(1, -1);
+  });
+  const out = JSON.parse(json) as Scenario;
+  out.tailored = merged;
+  out.initialFlags = template.tailor.filter((f) => f.type === "toggle" && merged[f.id] === true).map((f) => f.id);
+  out.template = template;
+  return out;
 }
 
 /** Cross-reference checks: ids, meters, flags and every condition. */
@@ -293,7 +350,7 @@ export function checkScenario(s: Scenario): string[] {
   const meterIds = new Set(s.meters.map((m) => m.id));
   const actionIds = new Set(s.actions.map((a) => a.id));
   const injectIds = new Set(s.injects.map((i) => i.id));
-  const flags = new Set(s.flags);
+  const flags = new Set([...s.flags, ...s.tailor.filter((t) => t.type === "toggle").map((t) => t.id)]);
   const allEffects: [string, Effects][] = [
     ...s.injects.map((i) => [`inject ${i.id}`, i.effects] as [string, Effects]),
     ...s.actions.map((a) => [`action ${a.id}`, a.effects] as [string, Effects]),
@@ -354,7 +411,41 @@ export function checkScenario(s: Scenario): string[] {
   for (const step of s.solution) {
     if (/^wait(\s+\S+)?$/.test(step)) continue;
     if (step === "end") continue;
-    if (!actionIds.has(step)) problems.push(`solution step "${step}" is not an action id (or "wait 30m", or "end")`);
+    if (!actionIds.has(step.replace(/^\?/, ""))) problems.push(`solution step "${step}" is not an action id (or "?id" for an optional step, "wait 30m", or "end")`);
   }
   return problems;
 }
+
+/** The tailoring choices of a scenario as label and display value, for reports and MSELs. */
+export function tailorSummary(s: Scenario): { id: string; label: string; value: string; changed: boolean }[] {
+  const fields = (s.template ?? s).tailor;
+  return fields.map((f) => {
+    const v = s.tailored[f.id] ?? f.default;
+    return { id: f.id, label: f.label, value: typeof v === "boolean" ? (v ? "yes" : "no") : String(v), changed: v !== f.default };
+  });
+}
+
+/** Read key=value words, as typed after "play 8". Unknown keys are reported. */
+export function parseTailorArgs(s: Scenario, words: string[]): { values: Record<string, string>; problems: string[] } {
+  const fields = (s.template ?? s).tailor;
+  const values: Record<string, string> = {};
+  const problems: string[] = [];
+  for (const w of words) {
+    const i = w.indexOf("=");
+    if (i < 1) {
+      problems.push(`"${w}" is not a setting. Use name=value, for example ${fields[0] ? `${fields[0].id}=...` : "org=Acme"}.`);
+      continue;
+    }
+    const key = w.slice(0, i);
+    const f = fields.find((x) => x.id === key);
+    if (!f) {
+      problems.push(fields.length ? `${s.title} has no setting "${key}". Settings: ${fields.map((x) => x.id).join(", ")}.` : `${s.title} has no settings to change.`);
+      continue;
+    }
+    const value = w.slice(i + 1);
+    if (f.type === "toggle" && !/^(y|yes|true|1|on|n|no|false|0|off)$/i.test(value)) problems.push(`${key} takes yes or no.`);
+    else values[key] = value;
+  }
+  return { values, problems };
+}
+

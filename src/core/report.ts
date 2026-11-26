@@ -1,3 +1,4 @@
+import { tailorSummary } from "./load.js";
 import type { Debrief, Sim } from "./engine.js";
 import { clockLabel, duration } from "./clock.js";
 import { buildFlow, overlayPath } from "./flow.js";
@@ -29,6 +30,8 @@ export function reportMarkdown(sim: Sim, when = new Date()): string {
   lines.push(`- **Result:** ${grade(d, s)}, score ${d.score}% (pass mark ${s.passMark}%)`);
   lines.push(`- **Exercise time used:** ${duration(d.time)}, ended at ${clockLabel(s, d.time)}`);
   lines.push(`- **Actions taken:** ${d.actionsTaken}`);
+  const setup = tailorSummary(s);
+  if (setup.length) lines.push(`- **Setup:** ${setup.map((t) => `${t.label}: ${t.value}`).join("; ")}`);
   lines.push("");
   lines.push(d.endText);
   lines.push("");

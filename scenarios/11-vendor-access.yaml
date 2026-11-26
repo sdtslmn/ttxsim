@@ -3,17 +3,27 @@ title: The vendor at 3 a.m.
 level: ot
 minutes: 25
 sector: Gas transmission
-org: Eastgate Gas Transmission (fictional)
+org: "{{org}}"
 role: You are the OT security lead for the pipeline operator.
 summary: The compressor vendor's remote account connects to a station in the middle of the night. The vendor says it wasn't them. Shut the door, find what changed, and give maintenance a safe way back.
 start: Thu 03:20
 limit: 8h
 pass: 70
 
+tailor:
+  - id: org
+    label: Organization name
+    type: text
+    default: Eastgate Gas Transmission
+  - id: vendor
+    label: Compressor vendor
+    type: text
+    default: TurboTech
+
 briefing: |
-  Eastgate runs six gas compressor stations along a pipeline. Each station's
+  {{org}} runs six gas compressor stations along a pipeline. Each station's
   compressor is controlled by a unit control PLC supplied and maintained by
-  the manufacturer, **TurboTech**. TurboTech has an always-on VPN account
+  the manufacturer, **{{vendor}}**. {{vendor}} has an always-on VPN account
   into the station networks so it can support the units remotely.
 
   An OT network monitoring sensor watches traffic at every station. The
@@ -71,13 +81,13 @@ injects:
 
   - id: vendor_notice
     at: 60
-    from: TurboTech Security
+    from: "{{vendor}} Security"
     via: email
     subject: Security notice to customers
     body: |
       We are investigating unauthorized access to our remote support
       environment. Customer remote access credentials may be exposed. As a
-      precaution, please disable TurboTech remote access accounts until we
+      precaution, please disable {{vendor}} remote access accounts until we
       contact you.
 
   - id: maintenance_ask
@@ -86,14 +96,14 @@ injects:
     via: email
     subject: Tomorrow's CS-3 turbine work
     body: |
-      TurboTech has an engineer booked for CS-3 turbine work tomorrow at 09:00.
+      {{vendor}} has an engineer booked for CS-3 turbine work tomorrow at 09:00.
       They do part of it remotely. If their access is off, can we still go
       ahead? Postponing means a second outage next month.
 
 actions:
   - id: disable_vendor
     group: contain
-    label: Disable the TurboTech VPN account and its always-on tunnel at the remote access gateway
+    label: Disable the {{vendor}} VPN account and its always-on tunnel at the remote access gateway
     takes: 5
     result: The account and tunnel are disabled at every station.
     effects:
@@ -120,9 +130,9 @@ actions:
 
   - id: call_vendor
     group: coordinate
-    label: Call TurboTech's security contact on the number in the contract
+    label: Call {{vendor}}'s security contact on the number in the contract
     takes: 15
-    result: TurboTech confirms none of their engineers connected tonight. Their support environment has been breached and they are notifying customers.
+    result: "{{vendor}} confirms none of their engineers connected tonight. Their support environment has been breached and they are notifying customers."
     effects:
       set: [vendor_called]
 
@@ -136,10 +146,10 @@ actions:
 
   - id: review_logs
     group: investigate
-    label: Review the remote access gateway logs for the TurboTech account
+    label: Review the remote access gateway logs for the {{vendor}} account
     takes: 30
     result: |
-      Tonight's session came from an address that isn't TurboTech's. The same
+      Tonight's session came from an address that isn't {{vendor}}'s. The same
       account logged in for a few minutes two nights ago at 02:10 and only read
       data. That looks like reconnaissance before tonight.
     effects:
@@ -147,7 +157,7 @@ actions:
 
   - id: check_reach
     group: investigate
-    label: Check which stations the TurboTech account can reach
+    label: Check which stations the {{vendor}} account can reach
     takes: 30
     result: The account can reach the unit control PLCs at all six stations. Nothing limits it to the station being worked on.
     effects:
@@ -186,16 +196,16 @@ actions:
   - id: supervised_access
     group: recover
     when: vendor_disabled
-    label: Give TurboTech a new access route with per-session approval, MFA and recording
+    label: Give {{vendor}} a new access route with per-session approval, MFA and recording
     takes: 1h
-    result: TurboTech gets named accounts with MFA. Each session must be approved by the control room and is recorded. Tomorrow's work can go ahead under supervision.
+    result: "{{vendor}} gets named accounts with MFA. Each session must be approved by the control room and is recorded. Tomorrow's work can go ahead under supervision."
     effects:
       set: [supervised_access]
 
   - id: reenable_vendor
     group: contain
     when: vendor_disabled and seen.maintenance_ask
-    label: Re-enable the old TurboTech account so tomorrow's maintenance can go ahead
+    label: Re-enable the old {{vendor}} account so tomorrow's maintenance can go ahead
     takes: 5
     result: The old account is live again. Within the hour, the monitor shows a login from the same unknown address.
     effects:
@@ -209,7 +219,7 @@ actions:
     group: communicate
     label: Report the incident to the national cyber authority and the energy regulator
     takes: 20
-    result: The reports are filed. The authority asks whether other operators use TurboTech and plans a sector alert.
+    result: The reports are filed. The authority asks whether other operators use {{vendor}} and plans a sector alert.
     effects:
       set: [authority_told]
 
@@ -263,8 +273,8 @@ objectives:
   - text: Confirm with the vendor through a channel you trust
     pass: vendor_called
     weight: 1
-    hit: You called TurboTech on the number in the contract and confirmed it wasn't them.
-    miss: You never confirmed with TurboTech directly.
+    hit: You called {{vendor}} on the number in the contract and confirmed it wasn't them.
+    miss: You never confirmed with {{vendor}} directly.
 
   - text: Find and undo what the attacker changed
     pass: cs3_restored
@@ -287,7 +297,7 @@ objectives:
   - text: Give maintenance a safe way back in
     pass: supervised_access and not reenabled
     weight: 2
-    hit: TurboTech has a supervised, recorded route, and the compromised account stays dead.
+    hit: "{{vendor}} has a supervised, recorded route, and the compromised account stays dead."
     miss: Maintenance either has no way in or uses the compromised account.
 
   - text: Report and brief
@@ -303,12 +313,12 @@ phases:
     text: |
       Looking back:
 
-      - Two months ago TurboTech asked for the always-on VPN "to cut callout
+      - Two months ago {{vendor}} asked for the always-on VPN "to cut callout
         times". It was approved by email.
-      - Last month a TurboTech engineer didn't turn up for a scheduled CS-5
+      - Last month a {{vendor}} engineer didn't turn up for a scheduled CS-5
         visit, yet the work order was closed as done.
       - The OT monitor flagged a short engineering session two nights ago. It
-        was assumed to be TurboTech testing.
+        was assumed to be {{vendor}} testing.
     questions:
       - Who approves vendor remote access, and who reviews how it is used?
       - Would anyone have questioned the closed work order or the night session?
@@ -327,7 +337,7 @@ phases:
     questions:
       - How do you prove each station's controller matches a known-good backup?
       - What must a vendor's remote access look like before tomorrow's maintenance?
-      - What does the contract require TurboTech to tell you, and how fast?
+      - What does the contract require {{vendor}} to tell you, and how fast?
 
 status:
   - id: vendor
@@ -368,11 +378,11 @@ attack:
   - tactic: Initial Access
     technique: T0822
     name: External Remote Services
-    note: TurboTech's always-on VPN into the station networks.
+    note: "{{vendor}}'s always-on VPN into the station networks."
   - tactic: Persistence
     technique: T0859
     name: Valid Accounts
-    note: Vendor credentials stolen in the breach of TurboTech's support environment.
+    note: Vendor credentials stolen in the breach of {{vendor}}'s support environment.
   - tactic: Collection
     technique: T0845
     name: Program Upload

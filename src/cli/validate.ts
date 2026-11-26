@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { builtinScenarioFiles, loadScenario, runSteps, Sim, ScenarioError, type Scenario } from "../core/index.js";
+import { applyTailoring, builtinScenarioFiles, loadScenario, runSteps, Sim, ScenarioError, type Scenario } from "../core/index.js";
 import { c } from "./term.js";
 
 export interface CheckResult {
@@ -67,7 +67,20 @@ export function validate(files: string[]): number {
       ids.add(s.id);
     }
   }
-  for (const s of scenarios) results.push(checkPlayable(s));
+  for (const s of scenarios) {
+    const r = checkPlayable(s);
+    // Every combination of yes/no tailoring toggles must be playable too.
+    const toggles = s.tailor.filter((t) => t.type === "toggle");
+    for (let mask = 1; mask < 1 << toggles.length; mask++) {
+      const values: Record<string, boolean> = {};
+      toggles.forEach((t, i) => (values[t.id] = mask & (1 << i) ? !(t.default as boolean) : (t.default as boolean)));
+      const v = checkPlayable(applyTailoring(s, values));
+      const label = toggles.map((t) => `${t.id}=${values[t.id] ? "yes" : "no"}`).join(", ");
+      for (const p of v.problems) r.problems.push(`with ${label}: ${p}`);
+    }
+    r.ok = r.problems.length === 0;
+    results.push(r);
+  }
   for (const r of results) {
     const scores = r.solutionScore !== undefined ? c.dim(` (solution ${r.solutionScore}%, doing nothing ${r.idleScore}%)`) : "";
     console.log(`${r.ok ? c.green("✔") : c.red("✘")} ${r.id}${scores}`);

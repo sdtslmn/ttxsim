@@ -3,15 +3,21 @@ title: Breakers that open themselves
 level: ot
 minutes: 25
 sector: Electricity transmission
-org: Coastal Power Transmission (fictional)
+org: "{{org}}"
 role: You are the OT security lead at the transmission control centre, on call tonight.
 summary: Substation breakers open with nobody at the controls. Someone is speaking the grid's own protocol. Find the source, keep the grid stable and stop it spreading.
 start: Wed 19:40
 limit: 6h
 pass: 70
 
+tailor:
+  - id: org
+    label: Organization name
+    type: text
+    default: Coastal Power Transmission
+
 briefing: |
-  Coastal Power Transmission runs the high-voltage grid for a coastal region.
+  {{org}} runs the high-voltage grid for a coastal region.
   The control centre's SCADA front-end sends commands to remote terminal units
   (RTUs) in each substation over **IEC 60870-5-104**. Each substation also has
   a station computer for local engineering and monitoring.

@@ -3,15 +3,21 @@ title: The fence at Pump Station 7
 level: ot
 minutes: 25
 sector: Water transmission
-org: Wadi Crest Water Transmission (fictional)
+org: "{{org}}"
 role: You are the OT security lead, woken by the control room.
 summary: Intruders cut the fence at an unmanned pump station and plug something into the network. Then a familiar voice calls the control room asking for door codes.
 start: Sun 01:50
 limit: 6h
 pass: 70
 
+tailor:
+  - id: org
+    label: Organization name
+    type: text
+    default: Wadi Crest Water Transmission
+
 briefing: |
-  Wadi Crest moves treated water from a coastal plant to three cities through
+  {{org}} moves treated water from a coastal plant to three cities through
   a pipeline with eleven unmanned pump stations. Each station has a PLC, a
   small network switch, cameras and door alarms, all linked back to the
   control centre.

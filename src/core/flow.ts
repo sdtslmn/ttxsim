@@ -1,3 +1,4 @@
+import { tailorSummary } from "./load.js";
 import { Sim, type LogEntry } from "./engine.js";
 import { identifiers, parse } from "./expr.js";
 import { clockLabel, elapsedLabel } from "./clock.js";
@@ -298,6 +299,13 @@ export function mselMarkdown(flow: Flow): string {
   out.push(`- **Organization:** ${s.org}${s.sector ? ` (${s.sector})` : ""}`);
   out.push(`- **Player role:** ${s.role}`);
   out.push(`- **Exercise clock:** starts ${clockLabel(s, 0)}, ends by ${clockLabel(s, s.limit)}`);
+  const setup = tailorSummary(s);
+  if (setup.length) {
+    out.push("");
+    out.push("## Setup for this exercise");
+    out.push("");
+    for (const t of setup) out.push(`- ${t.label}: **${t.value}**`);
+  }
   out.push("");
   out.push("## Objectives");
   out.push("");

@@ -3,17 +3,29 @@ title: The cursor moved
 level: ot
 minutes: 20
 sector: Water and wastewater
-org: Millbrook Water Authority (fictional)
+org: "{{org}}"
 role: You are the cybersecurity coordinator for a small water utility.
 summary: An operator watches someone remotely raise the chemical dosing setpoint at a water plant. Make the water safe, close the door, and tell the right people.
 start: Fri 13:32
 limit: 4h
 pass: 70
 
+tailor:
+  - id: org
+    label: Utility name
+    type: text
+    default: Millbrook Water Authority
+  - id: ph_alarm
+    label: A high pH alarm stops dosing automatically
+    type: toggle
+    default: true
+    help: Without it, only the operator stands between a setpoint change and the water.
+
 briefing: |
-  Millbrook Water Authority treats and supplies drinking water to 22,000
+  {{org}} treats and supplies drinking water to 22,000
   people. Sodium hydroxide is dosed to control pH. The dosing pumps have a
-  physical maximum rate, and a high pH alarm stops dosing automatically.
+  physical maximum rate{{#ph_alarm}}, and a high pH alarm stops dosing automatically{{/ph_alarm}}{{^ph_alarm}}. There is
+  no automatic cutout on high pH: operators watch the readings{{/ph_alarm}}.
 
   Treated water spends about a day in the reservoir and mains before it
   reaches homes. Staff use a remote desktop tool, installed on the HMI
@@ -100,7 +112,7 @@ actions:
     group: operations
     label: Confirm the dosing setpoint is back to normal and check the pump limits and pH alarm
     takes: 10
-    result: The setpoint is 100 ppm. The pump's physical maximum would have taken many hours to reach a harmful level, and the high pH alarm and its dosing cutout are working.
+    result: The setpoint is 100 ppm. The pump's physical maximum would have taken many hours to reach a harmful level.{{#ph_alarm}} The high pH alarm and its dosing cutout are working.{{/ph_alarm}}{{^ph_alarm}} There is no automatic cutout, so only the operator stands between a change and the water.{{/ph_alarm}}
     effects:
       set: [setpoint_confirmed]
 
@@ -237,10 +249,16 @@ actions:
 
 rules:
   - id: third_attempt
-    when: time >= 150 and not remote_disabled
+    when: time >= 150 and not remote_disabled and ph_alarm
     effects:
       safety: -25
     text: The attacker connects again at 16:02 and pushes the setpoint up. The high pH alarm trips the dosing pump before the operator even sees it.
+
+  - id: third_attempt_no_alarm
+    when: time >= 150 and not remote_disabled and not ph_alarm
+    effects:
+      safety: -45
+    text: The attacker connects again at 16:02 and pushes the setpoint up. With no automatic cutout, dosing runs high for twenty minutes before an operator spots it.
 
   - id: open_door
     when: not remote_disabled

@@ -65,6 +65,7 @@ export class Sim {
   constructor(scenario: Scenario) {
     this.scenario = scenario;
     for (const m of scenario.meters) this.meters[m.id] = m.start;
+    for (const f of scenario.initialFlags ?? []) this.flags.add(f);
     this.deliverDue();
     this.settle();
     this.flush();
@@ -339,6 +340,11 @@ export function runSteps(scenario: Scenario, steps: string[]): Sim {
     if (step === "end") {
       sim.finish();
       break;
+    }
+    if (step.startsWith("?")) {
+      const id = step.slice(1);
+      if (sim.availableActions().some((a) => a.id === id)) sim.act(id);
+      continue;
     }
     const r = sim.act(step);
     if (!r.ok) throw new Error(`step "${step}" at ${sim.time} min: ${r.error}`);

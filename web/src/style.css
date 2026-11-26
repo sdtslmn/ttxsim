@@ -1291,3 +1291,75 @@ details summary {
   background: var(--panel);
   border: 1px solid var(--line);
 }
+
+/* ---- setup (tailoring) ---- */
+
+.setupview {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 20px 50px;
+}
+
+.setup-box {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px 24px;
+}
+
+.setup-box h1 {
+  margin: 0 0 4px;
+  font-size: 24px;
+}
+
+#setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.field input[type="text"] {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.field.toggle {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+
+.field.toggle input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.small {
+  font-size: 13px;
+}

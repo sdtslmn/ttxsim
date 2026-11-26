@@ -3,15 +3,30 @@ title: Black screens in the control room
 level: ot
 minutes: 25
 sector: Food and beverage manufacturing
-org: Delta Crest Beverages (fictional)
+org: "{{org}}"
 role: You are the OT security lead for the plant, called in early on a Saturday.
 summary: Office ransomware has crossed into the bottling plant and the operator screens are going dark. Keep the process safe, cut the path, and recover cleanly.
 start: Sat 06:10
-limit: 8h
+limit: 10h
 pass: 70
 
+tailor:
+  - id: org
+    label: Organization name
+    type: text
+    default: Delta Crest Beverages
+  - id: vendor
+    label: Control system vendor
+    type: text
+    default: FillTech
+  - id: golden_images
+    label: Offline golden images of the HMIs exist
+    type: toggle
+    default: true
+    help: Without them, rebuilding the HMIs takes most of the day.
+
 briefing: |
-  Delta Crest Beverages runs a bottling plant with two filling lines, a
+  {{org}} runs a bottling plant with two filling lines, a
   clean-in-place (CIP) system that doses caustic for cleaning, and a steam
   boiler. PLCs control the lines. Operators watch and steer them through HMI
   computers in the control room. An engineering workstation (EWS) holds the
@@ -22,8 +37,9 @@ briefing: |
   interlocks on the CIP skid and the boiler's burner management system are
   hardwired and do not depend on the HMIs.
 
-  A clean "golden image" of each HMI and the EWS is kept offline in the plant
-  manager's safe.
+  {{#golden_images}}A clean "golden image" of each HMI and the EWS is kept offline in the plant
+  manager's safe.{{/golden_images}}{{^golden_images}}There are no golden images of the HMIs. Rebuilding one means
+  installing it from scratch and loading the project files.{{/golden_images}}
 
 meters:
   safety:
@@ -113,7 +129,7 @@ injects:
 
   - id: vendor_offer
     at: 90
-    from: FillTech Support
+    from: "{{vendor}} Support"
     via: email
     subject: We can help restore your HMIs now
     body: |
@@ -219,10 +235,19 @@ actions:
 
   - id: restore_hmis
     group: recover
-    when: it_ot_cut and hmis_isolated
+    when: it_ot_cut and hmis_isolated and golden_images
     label: Rebuild the HMIs from the offline golden images
     takes: 2h
     result: The HMIs are rebuilt from the golden images and reconnected.
+    effects:
+      set: [restore_done]
+
+  - id: rebuild_hmis
+    group: recover
+    when: it_ot_cut and hmis_isolated and not golden_images
+    label: Rebuild the HMIs from installation media and the project backups
+    takes: 6h
+    result: With no golden images, each HMI is installed from scratch and its project loaded and tested. It takes most of the day.
     effects:
       set: [restore_done]
 
@@ -239,9 +264,9 @@ actions:
   - id: vendor_vpn
     group: coordinate
     when: seen.vendor_offer
-    label: Enable FillTech's VPN account so they can help right away
+    label: Enable {{vendor}}'s VPN account so they can help right away
     takes: 5
-    result: FillTech connects. Twenty minutes later the firewall shows the same VPN account scanning the plant network from an address FillTech doesn't recognise.
+    result: "{{vendor}} connects. Twenty minutes later the firewall shows the same VPN account scanning the plant network from an address {{vendor}} doesn't recognise."
     effects:
       set: [vendor_connected]
       spread: 15
@@ -253,9 +278,9 @@ actions:
   - id: vendor_onsite
     group: coordinate
     when: seen.vendor_offer
-    label: Ask FillTech to send an engineer on site instead
+    label: Ask {{vendor}} to send an engineer on site instead
     takes: 15
-    result: FillTech will have an engineer at the plant by noon. They bring their own clean installation media.
+    result: "{{vendor}} will have an engineer at the plant by noon. They bring their own clean installation media."
     effects:
       set: [vendor_onsite]
 
@@ -443,6 +468,7 @@ phases:
     when: path_found or time >= 3h
     questions:
       - Where are your golden images and PLC backups, who can reach them at 6 a.m. on a Saturday, and when were they last tested?
+      - If you had no golden images, how long would rebuilding every HMI take, and could you run that long by hand?
       - What has to be true before anything is reconnected to the office network?
       - Which authority, customer and insurer deadlines apply, and who sends the reports?
 
@@ -530,7 +556,8 @@ solution:
   - remove_domain
   - image_hmis
   - verify_logic
-  - restore_hmis
+  - ?restore_hmis
+  - ?rebuild_hmis
   - notify_authority
   - close
 

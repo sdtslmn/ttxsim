@@ -3,23 +3,36 @@ title: The safety system tripped
 level: ot
 minutes: 25
 sector: Oil and gas processing
-org: North Ridge Gas Processing (fictional)
+org: "{{org}}"
 role: You are the site OT security engineer, on call tonight.
 summary: A safety instrumented system trips a unit in the middle of the night and its controller is in program mode. Hold the restart until you know the SIS can be trusted.
 start: Mon 02:10
-limit: 8h
+limit: 10h
 pass: 70
 
+tailor:
+  - id: org
+    label: Organization name
+    type: text
+    default: North Ridge Gas Processing
+  - id: offline_master
+    label: An offline master copy of the SIS logic exists
+    type: toggle
+    default: true
+    help: Without it, rebuilding trusted safety logic takes hours with the vendor.
+
 briefing: |
-  North Ridge processes natural gas in two units. Each unit has a safety
+  {{org}} processes natural gas in two units. Each unit has a safety
   instrumented system (SIS), separate from the control system, that shuts the
   unit down if pressure, temperature or flow go outside safe limits.
 
   Each SIS controller has a physical keyswitch. It must stay in **RUN**.
   **PROGRAM** allows changes to the safety logic and is only used under a
   permit with the SIS vendor. Engineers program the SIS from an engineering
-  workstation (EWS) in the control building. An offline master copy of each
-  unit's safety logic is kept in the site safe.
+  workstation (EWS) in the control building.{{#offline_master}} An offline master copy of each
+  unit's safety logic is kept in the site safe.{{/offline_master}}{{^offline_master}} There is no offline master copy of
+  the safety logic. The latest project files live on EWS-2 and the vendor's
+  file share.{{/offline_master}}
 
 meters:
   safety:
@@ -139,7 +152,7 @@ actions:
   - id: compare_logic
     group: investigate
     when: vendor_engaged
-    label: With the vendor, read the SIS controller memory and compare it with the offline master copy
+    label: With the vendor, read the SIS controller memory and compare it with {{#offline_master}}the offline master copy{{/offline_master}}{{^offline_master}}the vendor's last approved project files{{/offline_master}}
     takes: 1h
     result: |
       The controller memory holds code that is **not in the master copy**. It
@@ -149,9 +162,19 @@ actions:
     effects:
       set: [tamper_known]
 
+  - id: rebuild_logic
+    group: recover
+    when: tamper_known and not offline_master
+    label: With the vendor, rebuild the safety logic from the last approved project files, review it line by line and proof test
+    takes: 3h
+    result: With no offline master, the vendor and your safety engineer rebuild and review the logic, then proof test every trip function. All pass.
+    effects:
+      set: [logic_restored]
+      safety: 10
+
   - id: reload_logic
     group: recover
-    when: tamper_known
+    when: tamper_known and offline_master
     label: Reload the verified logic from the offline master and run a full proof test
     takes: 1h
     result: The vendor reloads the master logic and proof tests every Unit 2 trip function. All pass.
@@ -291,7 +314,7 @@ objectives:
     miss: You never checked the controller memory against the master copy.
 
   - text: Restore verified logic before any restart
-    pass: logic_restored and (not did.restart_unit or at.reload_logic < at.restart_unit)
+    pass: logic_restored and (not did.restart_unit or at.reload_logic < at.restart_unit or at.rebuild_logic < at.restart_unit)
     weight: 3
     hit: The logic was reloaded from the master and proof tested before any restart.
     miss: The unit restarted, or stayed down, without verified safety logic.
@@ -430,7 +453,8 @@ solution:
   - secure_unit1
   - image_ews
   - compare_logic
-  - reload_logic
+  - ?reload_logic
+  - ?rebuild_logic
   - notify_authority
   - restart_unit
   - close

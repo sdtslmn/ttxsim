@@ -3,15 +3,21 @@ title: Through the historian
 level: ot
 minutes: 25
 sector: Power and desalination
-org: Gulfside Power and Water (fictional)
+org: "{{org}}"
 role: You are the OT security lead for the plant.
 summary: An attacker in the office network rides the historian link into the plant and reaches an engineering workstation. Cut the path without losing the reports the regulator needs.
 start: Tue 10:30
 limit: 8h
 pass: 70
 
+tailor:
+  - id: org
+    label: Organization name
+    type: text
+    default: Gulfside Power and Water
+
 briefing: |
-  Gulfside runs a combined power and desalination plant. Gas turbines make
+  {{org}} runs a combined power and desalination plant. Gas turbines make
   power, and reverse osmosis (RO) trains make drinking water. A plant
   historian on the OT network collects process data and replicates it through
   the DMZ to a corporate historian, which feeds management dashboards and the

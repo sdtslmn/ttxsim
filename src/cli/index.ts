@@ -14,6 +14,9 @@ import {
   GROUPS,
   LEVEL_LABELS,
   loadScenario,
+  applyTailoring,
+  parseTailorArgs,
+  tailorSummary,
   reportMarkdown,
   ScenarioError,
   Sim,
@@ -103,6 +106,10 @@ function start(s: Scenario): void {
   say(c.bold("Objectives"));
   for (const o of s.objectives) say(`  - ${o.text}`);
   say();
+  const setup = tailorSummary(s);
+  if (setup.length) {
+    say(c.dim(`Setup: ${setup.map((t) => `${t.label}: ${t.value}`).join("; ")}. Type setup to see what you can change.`));
+  }
   say(c.dim(`The exercise starts at ${clockLabel(s, 0)} and runs for up to ${duration(s.limit)}.`));
   say(c.dim(`Useful commands: inbox, read, actions, do <n>, wait, status, log, help.`));
   say();
@@ -259,7 +266,7 @@ function showDebrief(): void {
     s.attack.forEach((a, i) => say(`  ${i + 1}. ${c.dim(a.tactic.padEnd(26))} ${a.technique} ${a.name}`));
   }
   say();
-  say(c.dim(`Type report to save an after-action report, map to see your path, play ${scenarios.indexOf(s) + 1} to try again, or next.`));
+  say(c.dim(`Type report to save an after-action report, map to see your path, play ${[scenarios.findIndex((x) => x.id === s.id) + 1, settingArgs(s)].filter(Boolean).join(" ")} to try again, or next.`));
 }
 
 function writeReport(file?: string): void {
@@ -283,7 +290,7 @@ function parseWait(arg: string | undefined): number | undefined | null {
 
 function showMap(s: Scenario): void {
   const flow = buildFlow(s);
-  const overlay = sim && sim.scenario === s && sim.ended ? overlayPath(flow, sim) : undefined;
+  const overlay = sim && sim.scenario.id === s.id && sim.ended ? overlayPath(flow, sim) : undefined;
   say(rule(`Scenario map: ${s.title}`));
   say(c.dim(overlay ? "Your path is marked: ✔ you did it, ✘ you missed it, ! it happened to you." : "Spoilers: this is the model response, with traps and the consequences of skipping steps."));
   say();
@@ -299,7 +306,7 @@ function showMap(s: Scenario): void {
     }
   }
   say();
-  say(c.dim(`Type msel ${scenarios.includes(s) ? scenarios.indexOf(s) + 1 : ""} to save the master scenario events list for facilitators.`));
+  say(c.dim(`Type msel ${[scenarios.findIndex((x) => x.id === s.id) + 1 || s.id, settingArgs(s)].filter(Boolean).join(" ")} to save the master scenario events list for facilitators.`));
 }
 
 function writeMsel(s: Scenario, file?: string): void {
@@ -312,7 +319,8 @@ function writeMsel(s: Scenario, file?: string): void {
 function help(): void {
   say(`${c.bold("Before an exercise")}
   scenarios              list the scenarios
-  play <n|id>            start one
+  play <n|id> [k=v ...]  start one, optionally with your own settings
+  setup <n|id>           show the settings a scenario can take
   load <file.yaml>       start your own scenario file
 
 ${c.bold("During an exercise")}
@@ -346,6 +354,49 @@ function pickScenario(ref: string): Scenario | undefined {
   return scenarios.find((s) => s.id === ref);
 }
 
+/** Split a typed line into words, keeping "quoted text" together. */
+function words(line: string): string[] {
+  return (line.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []).map((w) => w.replace(/"([^"]*)"|'([^']*)'/g, "$1$2"));
+}
+
+/** Apply key=value settings to a scenario, or print what is wrong and return undefined. */
+function tailored(s: Scenario, settings: string[]): Scenario | undefined {
+  if (!settings.length) return s;
+  const { values, problems } = parseTailorArgs(s, settings);
+  if (problems.length) {
+    for (const p of problems) say(c.red(p));
+    return undefined;
+  }
+  return applyTailoring(s, values);
+}
+
+/** The key=value words that reproduce a scenario's non-default settings. */
+function settingArgs(s: Scenario): string {
+  return tailorSummary(s)
+    .filter((t) => t.changed)
+    .map((t) => `${t.id}=${/\s/.test(t.value) ? `"${t.value}"` : t.value}`)
+    .join(" ");
+}
+
+function showSetup(s: Scenario): void {
+  const fields = tailorSummary(s);
+  const n = scenarios.findIndex((x) => x.id === s.id) + 1;
+  say(rule(`Setup: ${s.title}`));
+  if (!fields.length) {
+    say("This scenario has no settings to change.");
+    return;
+  }
+  const defs = (s.template ?? s).tailor;
+  for (const t of fields) {
+    const f = defs.find((x) => x.id === t.id)!;
+    say(`  ${c.cyan(t.id.padEnd(16))} ${t.label}: ${c.bold(t.value)}${f.type === "toggle" ? c.dim(" (yes or no)") : ""}`);
+    if (f.help) say(`  ${" ".repeat(16)} ${c.dim(f.help)}`);
+  }
+  say();
+  const sample = defs.map((f) => (f.type === "toggle" ? `${f.id}=${f.default ? "no" : "yes"}` : `${f.id}="Your ${f.label.toLowerCase()}"`))[0];
+  say(`Type ${c.cyan(`play ${n || s.id} ${sample}`)} to start with your own settings.`);
+}
+
 function loadFile(file: string): Scenario | undefined {
   try {
     return loadScenario(readFileSync(file, "utf8"), file);
@@ -358,6 +409,7 @@ function loadFile(file: string): Scenario | undefined {
 
 function run(line: string): boolean {
   const [cmd, ...rest] = line.trim().split(/\s+/);
+  const typed = words(line.trim()).slice(1);
   const arg = rest.join(" ");
   switch ((cmd ?? "").toLowerCase()) {
     case "":
@@ -377,9 +429,20 @@ function run(line: string): boolean {
       return true;
     case "play":
     case "start": {
-      const s = arg ? pickScenario(arg) : scenarios[0];
-      if (!s) say(c.red(`No scenario "${arg}". Type scenarios.`));
-      else start(s);
+      const [ref, ...settings] = typed;
+      const base = ref ? pickScenario(ref) : scenarios[0];
+      if (!base) say(c.red(`No scenario "${ref}". Type scenarios.`));
+      else {
+        const s = tailored(base, settings);
+        if (s) start(s);
+      }
+      return true;
+    }
+    case "setup":
+    case "tailor": {
+      const s = typed[0] ? pickScenario(typed[0]) : sim?.scenario;
+      if (!s) say(typed[0] ? c.red(`No scenario "${typed[0]}".`) : "Usage: setup <n|id>");
+      else showSetup(s);
       return true;
     }
     case "load": {
@@ -391,20 +454,28 @@ function run(line: string): boolean {
       return true;
     }
     case "map": {
-      const s = arg ? pickScenario(arg) : sim?.scenario;
-      if (!s) say(arg ? c.red(`No scenario "${arg}".`) : "Usage: map <n|id>");
-      else showMap(s);
+      const [ref, ...settings] = typed;
+      const base = ref ? pickScenario(ref) : sim?.scenario;
+      if (!base) say(ref ? c.red(`No scenario "${ref}".`) : "Usage: map <n|id>");
+      else {
+        const s = tailored(base, settings);
+        if (s) showMap(s);
+      }
       return true;
     }
     case "msel": {
-      const [ref, file] = rest;
-      const s = ref ? pickScenario(ref) : sim?.scenario;
-      if (!s) say("Usage: msel <n|id> [file.md|file.csv]");
-      else writeMsel(s, file);
+      const [ref, ...more] = typed;
+      const file = more.find((w) => !w.includes("="));
+      const base = ref ? pickScenario(ref) : sim?.scenario;
+      if (!base) say("Usage: msel <n|id> [file.md|file.csv] [setting=value ...]");
+      else {
+        const s = tailored(base, more.filter((w) => w.includes("=")));
+        if (s) writeMsel(s, file);
+      }
       return true;
     }
     case "next": {
-      const i = sim ? scenarios.indexOf(sim.scenario) : -1;
+      const i = sim ? scenarios.findIndex((x) => x.id === sim!.scenario.id) : -1;
       const s = scenarios[i + 1];
       if (!s) say("That was the last scenario. Type scenarios to pick another.");
       else start(s);
@@ -548,12 +619,13 @@ function main(): void {
   }
   if (cmd === "--help" || cmd === "-h") {
     say("Usage: ttxsim                 interactive mode");
-    say("       ttxsim play <n|id>     start a scenario");
+    say("       ttxsim play <n|id> [setting=value ...]  start a scenario");
     say("       ttxsim play <file>     start your own scenario file");
     say("       ttxsim list            list scenarios");
     say("       ttxsim validate [files] check scenario files");
     say("       ttxsim map <n|id>      show a scenario map");
-    say("       ttxsim msel <n|id> [file] save the master scenario events list");
+    say("       ttxsim msel <n|id> [file] [setting=value ...] save the master scenario events list");
+    say("       ttxsim setup <n|id>    show the settings a scenario can take");
     return;
   }
   try {
@@ -566,23 +638,33 @@ function main(): void {
     listScenarios();
     return;
   }
-  if (cmd === "map" || cmd === "msel") {
-    const s = pickScenario(args[0] ?? "") ?? (args[0] && existsSync(args[0]) ? loadFile(args[0]) : undefined);
-    if (!s) {
+  const lookup = (ref: string) => pickScenario(ref) ?? (ref && existsSync(ref) && /\.ya?ml$/.test(ref) ? loadFile(ref) : undefined);
+  if (cmd === "map" || cmd === "msel" || cmd === "setup") {
+    const base = lookup(args[0] ?? "");
+    if (!base) {
       say(c.red(`No scenario "${args[0] ?? ""}".`));
       process.exit(1);
     }
+    if (cmd === "setup") {
+      showSetup(base);
+      return;
+    }
+    const more = args.slice(1);
+    const s = tailored(base, more.filter((w) => w.includes("=")));
+    if (!s) process.exit(1);
     if (cmd === "map") showMap(s);
-    else writeMsel(s, args[1]);
+    else writeMsel(s, more.find((w) => !w.includes("=")));
     return;
   }
   if (cmd === "play") {
     const ref = args[0] ?? "1";
-    const s = existsSync(ref) && ref.endsWith(".yaml") ? loadFile(ref) : pickScenario(ref);
-    if (!s) {
+    const base = lookup(ref);
+    if (!base) {
       say(c.red(`No scenario "${ref}".`));
       process.exit(1);
     }
+    const s = tailored(base, args.slice(1));
+    if (!s) process.exit(1);
     interactive(s);
     return;
   }
