@@ -314,6 +314,110 @@ objectives:
     hit: The authorities have their reports and operations understood the hold.
     miss: The authorities or the operations manager were left out.
 
+phases:
+  - id: earlier_signs
+    title: Earlier warning signs
+    at: 0
+    text: |
+      Looking back:
+
+      - A month ago the EWS antivirus quarantined a file in a temp folder. The
+        ticket was closed as a false positive.
+      - In the spring the Unit 2 SIS keyswitch was found in PROGRAM after
+        maintenance and put back to RUN. Nobody asked why.
+      - Remote desktop from the DMZ jump host into the control network was
+        opened for a vendor project last year and never closed.
+    questions:
+      - Who watches the EWS and the SIS keyswitch positions, and how would they notice a change?
+      - Does your permit-to-work system cover SIS mode changes? Who signs?
+
+  - id: hold
+    title: Hold or restart
+    when: did.hold_restart or time >= 30
+    questions:
+      - Who has the authority to keep a unit down against production pressure, and is it written down?
+      - What evidence would you need before trusting the SIS again?
+      - When do you call the SIS vendor and the process safety engineer, and who calls them?
+
+  - id: recovery
+    title: Proving the SIS and reporting
+    when: tamper_known or time >= 4h
+    questions:
+      - How do you prove the reloaded logic is genuine? Where is the master copy, and who controls it?
+      - What has to happen before Unit 1 and Unit 2 run normally again?
+      - Who reports to the safety regulator and the national authority, and when?
+
+status:
+  - id: unit
+    label: Unit 2
+    states:
+      - when: restarted
+        text: Running
+        tone: ok
+      - when: restart_hold
+        text: On hold
+        tone: info
+      - text: Tripped, no hold
+        tone: bad
+  - id: sis
+    label: Unit 2 SIS
+    states:
+      - when: logic_restored
+        text: Verified logic, proof tested
+        tone: ok
+      - when: tamper_known
+        text: Logic tampered with
+        tone: bad
+      - when: u2_key_run
+        text: In RUN, logic unverified
+        tone: warn
+      - when: seen.keyswitch_found
+        text: Keyswitch in PROGRAM
+        tone: bad
+      - text: Controller fault
+        tone: warn
+  - id: ews
+    label: EWS-2
+    states:
+      - when: ews_isolated
+        text: Isolated
+        tone: ok
+      - text: Connected
+        tone: bad
+  - id: unit1
+    label: Unit 1 SIS
+    states:
+      - when: unit1_secured
+        text: In RUN
+        tone: ok
+      - when: unit1_found
+        text: Keyswitch in PROGRAM
+        tone: bad
+      - text: Not checked
+        tone: warn
+
+attack:
+  - tactic: Lateral Movement
+    technique: T0886
+    name: Remote Services
+    note: Remote desktop from the DMZ jump host into EWS-2.
+  - tactic: Lateral Movement
+    technique: T0859
+    name: Valid Accounts
+    note: A controls engineer's account is used for the session.
+  - tactic: Execution
+    technique: T0858
+    name: Change Operating Mode
+    note: The SIS controllers sit in PROGRAM, which lets their logic be changed.
+  - tactic: Lateral Movement
+    technique: T0843
+    name: Program Download
+    note: logsync.exe sends new code to the Unit 2 safety controller.
+  - tactic: Impact
+    technique: T0880
+    name: Loss of Safety
+    note: The change aimed to stop the SIS acting on high pressure. A fault tripped the unit first.
+
 solution:
   - hold_restart
   - isolate_ews

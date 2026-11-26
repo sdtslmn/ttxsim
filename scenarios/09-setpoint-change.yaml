@@ -297,6 +297,90 @@ objectives:
     hit: You kept the plant running safely instead of shutting it down for nothing.
     miss: The shutdown wasn't needed and fed the rumours.
 
+phases:
+  - id: earlier_signs
+    title: Earlier warning signs
+    at: 0
+    text: |
+      Looking back:
+
+      - Six months ago a council IT review recommended removing the remote
+        desktop tool. It stayed because on-call staff rely on it.
+      - The shared password is on a sticky note in the control room and hasn't
+        changed since the tool was installed.
+      - Last week an operator said the HMI "logged itself out" overnight. Nobody
+        followed it up.
+    questions:
+      - Who knew the remote tool was a risk, and why did it stay?
+      - Would your operators report a moving mouse or an odd logout? Who would they call on a Friday afternoon?
+
+  - id: closing_door
+    title: Closing the door
+    when: did.disable_remote or did.uninstall_remote or time >= 30
+    questions:
+      - Who has the authority to cut remote access that on-call staff depend on?
+      - How do you cover the plant at night without the remote tool?
+      - Which safeguards stopped harm today (pump limit, pH alarm, the operator), and which would you not want to rely on?
+
+  - id: public_health
+    title: Public health and the public
+    when: water_ok or time >= 2h
+    questions:
+      - Who must you notify (regulator, public health, police), within what time, and who signs off?
+      - What would make you issue a boil-water or do-not-drink notice, and who decides?
+      - Who speaks to the media and the community group, and what do they say?
+
+status:
+  - id: remote
+    label: Remote access
+    states:
+      - when: remote_disabled
+        text: Closed
+        tone: ok
+      - text: Open
+        tone: bad
+  - id: dosing
+    label: Chemical dosing
+    states:
+      - when: setpoint_confirmed
+        text: Normal, safeguards checked
+        tone: ok
+      - text: Reverted by operator, unchecked
+        tone: warn
+  - id: water
+    label: Water quality
+    states:
+      - when: water_ok
+        text: Confirmed safe
+        tone: ok
+      - when: did.sample_water
+        text: Samples at the lab
+        tone: info
+      - text: Not tested
+        tone: warn
+
+attack:
+  - tactic: Initial Access
+    technique: T0822
+    name: External Remote Services
+    note: A remote desktop tool on the HMI computer, reachable from the internet.
+  - tactic: Persistence
+    technique: T0859
+    name: Valid Accounts
+    note: One shared password, used by every member of staff and never changed.
+  - tactic: Execution
+    technique: T0823
+    name: Graphical User Interface
+    note: The attacker drives the HMI screens directly, as an operator would.
+  - tactic: Impair Process Control
+    technique: T0836
+    name: Modify Parameter
+    note: The sodium hydroxide setpoint is raised from 100 to 11,100 ppm.
+  - tactic: Impact
+    technique: T0831
+    name: Manipulation of Control
+    note: The aim was to overdose the water. The operator, the pump limit and the pH alarm stopped it.
+
 solution:
   - confirm_setpoint
   - export_logs

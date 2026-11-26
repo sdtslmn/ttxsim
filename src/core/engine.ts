@@ -1,5 +1,5 @@
 import { evaluate, isTrue, parse, type Node, type Value } from "./expr.js";
-import { GROUPS, type Action, type Effects, type Group, type Inject, type Objective, type Scenario, type TextVariant } from "./types.js";
+import { GROUPS, type Action, type Effects, type Group, type Inject, type Objective, type Phase, type Scenario, type StatusItem, type TextVariant, type Tone } from "./types.js";
 
 export const NOT_YET = 99999;
 
@@ -10,7 +10,7 @@ export interface Delivered {
   read: boolean;
 }
 
-export type LogKind = "inject" | "action" | "rule" | "system" | "end";
+export type LogKind = "inject" | "action" | "rule" | "phase" | "system" | "end";
 
 export interface LogEntry {
   time: number;
@@ -54,6 +54,10 @@ export class Sim {
   ended = false;
   failed = false;
   endText = "";
+  /** Discussion phases reached, in order. */
+  phases: { phase: Phase; time: number }[] = [];
+  /** Player or team notes, by phase id. */
+  notes: Record<string, string> = {};
   private fired = new Set<string>();
   private cache = new Map<string, Node>();
   private pending: LogEntry[] = [];
@@ -199,6 +203,32 @@ export class Sim {
     for (const inj of this.scenario.injects) {
       if (inj.at !== undefined && inj.at <= this.time && !this.done.has(inj.id) && this.test(inj.when)) this.deliver(inj);
     }
+    for (const ph of this.scenario.phases) {
+      if (ph.at !== undefined && ph.at <= this.time && !this.phaseReached(ph.id) && this.test(ph.when)) this.reachPhase(ph);
+    }
+  }
+
+  phaseReached(id: string): boolean {
+    return this.phases.some((p) => p.phase.id === id);
+  }
+
+  private reachPhase(ph: Phase): void {
+    this.phases.push({ phase: ph, time: this.time });
+    this.pending.push({ time: this.time, kind: "phase", title: ph.title, ref: ph.id });
+  }
+
+  /** Save notes for a discussion phase. */
+  setNote(phaseId: string, text: string): void {
+    if (text.trim()) this.notes[phaseId] = text;
+    else delete this.notes[phaseId];
+  }
+
+  /** Current value of each status indicator. */
+  statusNow(): { item: StatusItem; text: string; tone: Tone }[] {
+    return this.scenario.status.map((item) => {
+      const st = item.states.find((x) => this.test(x.when)) ?? item.states[item.states.length - 1];
+      return { item, text: st.text, tone: st.tone };
+    });
   }
 
   /** Fire condition-based injects and one-shot rules until nothing else changes. */
@@ -209,6 +239,12 @@ export class Sim {
         if (this.ended) break;
         if (inj.at === undefined && !this.done.has(inj.id) && this.test(inj.when)) {
           this.deliver(inj);
+          changed = true;
+        }
+      }
+      for (const ph of this.scenario.phases) {
+        if (ph.at === undefined && !this.phaseReached(ph.id) && this.test(ph.when)) {
+          this.reachPhase(ph);
           changed = true;
         }
       }

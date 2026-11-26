@@ -18,6 +18,7 @@ import {
   mselCsv,
   mselMarkdown,
   overlayPath,
+  attackUrl,
   type Delivered,
   type LogEntry,
   type Scenario,
@@ -31,6 +32,7 @@ const app = document.getElementById("app")!;
 type Reader =
   | { kind: "briefing" }
   | { kind: "message"; index: number }
+  | { kind: "phase"; id: string }
   | { kind: "update"; entries: LogEntry[]; note?: string };
 
 let scenarios: Scenario[] = [];
@@ -197,19 +199,45 @@ function renderMeters(): string {
     .join("");
 }
 
+function renderStatus(): string {
+  const items = sim!.statusNow();
+  if (!items.length) return "";
+  return `<div class="status-row">${items
+    .map((st) => `<span class="status-chip t-${st.tone}"><span class="status-label">${esc(st.item.label)}</span>${esc(st.text)}</span>`)
+    .join("")}</div>`;
+}
+
 function renderInbox(): string {
   const s = sim!.scenario;
-  const items = sim!.inbox
-    .map((d, i) => ({ d, i }))
-    .reverse()
-    .map(({ d, i }) => {
-      const active = reader.kind === "message" && reader.index === i ? " active" : "";
-      return `<button class="mail${d.read ? "" : " unread"}${active}" data-msg="${i}">
+  const hm = (t: number) => esc(clockLabel(s, t).replace(/^\w{3} /, "").replace(/^Day \d+ /, ""));
+  const entries: { time: number; order: number; html: string }[] = sim!.inbox.map((d, i) => {
+    const active = reader.kind === "message" && reader.index === i ? " active" : "";
+    return {
+      time: d.time,
+      order: i,
+      html: `<button class="mail${d.read ? "" : " unread"}${active}" data-msg="${i}">
         <span class="mail-icon ch-${d.inject.via}" aria-hidden="true">${channelIcon[d.inject.via]}</span>
         <span class="mail-body"><span class="mail-from">${esc(d.inject.from)}</span><span class="mail-subject">${esc(d.inject.subject)}</span></span>
-        <span class="mail-time">${esc(clockLabel(s, d.time).replace(/^\w{3} /, ""))}</span>
-      </button>`;
-    })
+        <span class="mail-time">${hm(d.time)}</span>
+      </button>`,
+    };
+  });
+  sim!.phases.forEach((p, i) => {
+    const active = reader.kind === "phase" && reader.id === p.phase.id ? " active" : "";
+    const noted = sim!.notes[p.phase.id] ? " noted" : "";
+    entries.push({
+      time: p.time,
+      order: -1 - i,
+      html: `<button class="mail discuss${active}${noted}" data-phase="${esc(p.phase.id)}">
+        <span class="mail-icon" aria-hidden="true">🗣</span>
+        <span class="mail-body"><span class="mail-from">Discussion point${noted ? " · noted" : ""}</span><span class="mail-subject">${esc(p.phase.title)}</span></span>
+        <span class="mail-time">${hm(p.time)}</span>
+      </button>`,
+    });
+  });
+  const items = entries
+    .sort((a, b) => b.time - a.time || b.order - a.order)
+    .map((e) => e.html)
     .join("");
   const active = reader.kind === "briefing" ? " active" : "";
   return `<button class="mail brief${active}" data-brief>
@@ -231,6 +259,21 @@ function messageHtml(d: Delivered): string {
   </article>`;
 }
 
+function phaseHtml(id: string): string {
+  const s = sim!.scenario;
+  const reached = sim!.phases.find((p) => p.phase.id === id);
+  if (!reached) return "";
+  const ph = reached.phase;
+  return `<article class="message phase">
+    <div class="msg-head"><span class="tag discuss-tag">🗣 Discussion point</span><span class="muted">${esc(clockLabel(s, reached.time))}</span></div>
+    <h3>${esc(ph.title)}</h3>
+    ${ph.text ? `<div class="text">${md(ph.text)}</div>` : ""}
+    <ol class="questions">${ph.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ol>
+    <label class="note-label" for="note-${esc(ph.id)}">Your answer or the team's notes (saved in the report)</label>
+    <textarea class="note" id="note-${esc(ph.id)}" data-note="${esc(ph.id)}" rows="4" placeholder="What does your plan say? Who decides? What would you do differently?">${esc(sim!.notes[ph.id] ?? "")}</textarea>
+  </article>`;
+}
+
 function renderReader(): string {
   const s = sim!.scenario;
   if (reader.kind === "briefing") {
@@ -248,6 +291,7 @@ function renderReader(): string {
     const d = sim!.inbox[reader.index];
     return d ? messageHtml(d) : "";
   }
+  if (reader.kind === "phase") return phaseHtml(reader.id);
   const parts: string[] = [];
   if (reader.note) parts.push(`<p class="muted note">${esc(reader.note)}</p>`);
   for (const e of reader.entries) {
@@ -260,6 +304,8 @@ function renderReader(): string {
     } else if (e.kind === "inject") {
       const i = sim!.inbox.findIndex((d) => d.inject.id === e.ref);
       if (i >= 0) parts.push(messageHtml(sim!.inbox[i]));
+    } else if (e.kind === "phase" && e.ref) {
+      parts.push(phaseHtml(e.ref));
     } else if (e.kind === "rule") {
       parts.push(`<div class="notice"><span class="muted">${esc(clockLabel(s, e.time))}</span> ${esc(e.title)}</div>`);
     }
@@ -302,6 +348,7 @@ function renderPlay(): string {
     <div class="clock" aria-live="polite"><strong>${esc(clockLabel(s, sim!.time))}</strong><span>${esc(elapsedLabel(sim!.time))}</span></div>
   </header>
   <div class="meters">${renderMeters()}</div>
+  ${renderStatus()}
   <main class="board">
     <aside class="pane inbox"><h2>Inbox ${unread ? `<span class="count">${unread}</span>` : ""}</h2><div class="mails">${renderInbox()}</div></aside>
     <section class="pane reader" aria-live="polite">${renderReader()}</section>
@@ -338,6 +385,16 @@ function bindPlay(): void {
     reader = { kind: "briefing" };
     render();
   });
+  app.querySelectorAll<HTMLButtonElement>("[data-phase]").forEach((b) =>
+    b.addEventListener("click", () => {
+      reader = { kind: "phase", id: b.dataset.phase! };
+      render();
+      if (window.innerWidth < 900) app.querySelector(".reader")?.scrollIntoView({ behavior: "smooth" });
+    }),
+  );
+  app.querySelectorAll<HTMLTextAreaElement>("[data-note]").forEach((t) =>
+    t.addEventListener("input", () => sim!.setNote(t.dataset.note!, t.value)),
+  );
   app.querySelectorAll<HTMLButtonElement>("[data-msg]").forEach((b) =>
     b.addEventListener("click", () => {
       const i = Number(b.dataset.msg);
@@ -426,6 +483,8 @@ function renderMap(): string {
       </div>
     </section>
     <section class="block">${renderFlow(flow)}</section>
+    ${phasesGuideHtml(s)}
+    ${attackHtml(s)}
   </main>`;
 }
 
@@ -505,6 +564,8 @@ function renderDebrief(): string {
     ${lessons}
     <section class="block"><h3>Where things ended</h3><table class="table"><thead><tr><th>Measure</th><th>Start</th><th>End</th><th></th></tr></thead><tbody>${meters}</tbody></table></section>
     <section class="block"><details><summary>Timeline (${sim!.log.length} events)</summary><table class="table timeline"><tbody>${timeline}</tbody></table></details></section>
+    ${attackHtml(s)}
+    ${notesHtml()}
     <section class="block"><h3>Your path against the model path</h3>${renderFlow(buildFlow(s), overlayPath(buildFlow(s), sim!))}</section>
     <section class="block hotwash"><h3>Hot wash questions for your team</h3><ul>
       <li>What did we know at each decision point, and what did we assume?</li>
@@ -512,6 +573,36 @@ function renderDebrief(): string {
       <li>Does our real incident response plan cover this situation? Who owns each gap?</li>
     </ul></section>
   </main>`;
+}
+
+function attackHtml(s: Scenario): string {
+  if (!s.attack.length) return "";
+  return `<section class="block"><h3>Attack path (MITRE ATT&amp;CK${s.attackMatrix === "ics" ? " for ICS" : ""})</h3>
+    <ol class="attack">${s.attack
+      .map(
+        (a) => `<li><span class="attack-tactic">${esc(a.tactic)}</span><a href="${attackUrl(a.technique)}" target="_blank" rel="noopener">${esc(a.technique)} ${esc(a.name)}</a>${a.note ? `<p>${esc(a.note)}</p>` : ""}</li>`,
+      )
+      .join("")}</ol></section>`;
+}
+
+function notesHtml(): string {
+  if (!sim || !sim.scenario.phases.length) return "";
+  const rows = sim.scenario.phases
+    .map((ph) => {
+      const note = sim!.notes[ph.id];
+      return `<li><strong>${esc(ph.title)}</strong>${note ? `<p>${esc(note)}</p>` : `<p class="muted">${sim!.phaseReached(ph.id) ? "No notes recorded." : "Not reached."}</p>`}</li>`;
+    })
+    .join("");
+  return `<section class="block"><h3>Your discussion notes</h3><ul class="lessons notes-list">${rows}</ul></section>`;
+}
+
+function phasesGuideHtml(s: Scenario): string {
+  if (!s.phases.length) return "";
+  return `<section class="block"><h3>Discussion phases</h3>${s.phases
+    .map(
+      (ph) => `<div class="guide-phase"><strong>${esc(ph.title)}</strong>${ph.text ? `<div class="text">${md(ph.text)}</div>` : ""}<ol class="questions">${ph.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ol></div>`,
+    )
+    .join("")}</section>`;
 }
 
 function bindDebrief(): void {

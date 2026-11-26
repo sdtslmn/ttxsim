@@ -351,6 +351,12 @@ rules:
       loss: 5
       safety: -10
 
+  - id: no_plan
+    when: time >= 45 and not manual_ops and not shutdown
+    effects:
+      safety: -5
+    text: Forty-five minutes in, operators are still running without screens and without a clear plan.
+
   - id: evidence_gone
     when: restore_done and not hmis_imaged
     effects:
@@ -405,6 +411,113 @@ objectives:
     weight: 1
     hit: The authority has its report and management knows the plan.
     miss: The authority or management was left out.
+
+phases:
+  - id: earlier_signs
+    title: Earlier warning signs
+    at: 0
+    text: |
+      Looking back, there were signs before this morning:
+
+      - Two weeks ago IT flagged a VPN login for the **svc_backup** account
+        from an unusual country. It was closed as a false positive.
+      - Last month an audit noted that the HMIs are still members of the office
+        domain. The fix was planned for the next shutdown.
+      - The historian has two network cards, one on the office network and one
+        on the plant network.
+    questions:
+      - Who would have told the plant about the VPN alert, and does that path exist today?
+      - Who owns the risk of plant machines sitting on the office domain?
+      - Does your OT incident response plan say who can order the IT to OT link cut, and how fast?
+
+  - id: safe_operation
+    title: Running without screens
+    when: manual_ops or shutdown or time >= 45
+    questions:
+      - Who decides between manual running and a controlled shutdown, and on what criteria?
+      - How long can your operators run safely from local panels, and what extra staff does it take?
+      - How do you confirm the safety systems don't depend on anything that is down?
+
+  - id: recovery
+    title: Recovery and reporting
+    when: path_found or time >= 3h
+    questions:
+      - Where are your golden images and PLC backups, who can reach them at 6 a.m. on a Saturday, and when were they last tested?
+      - What has to be true before anything is reconnected to the office network?
+      - Which authority, customer and insurer deadlines apply, and who sends the reports?
+
+status:
+  - id: link
+    label: IT to OT link
+    states:
+      - when: it_ot_cut
+        text: Cut
+        tone: ok
+      - text: Open
+        tone: bad
+  - id: view
+    label: Operator view
+    states:
+      - when: restored
+        text: Restored
+        tone: ok
+      - when: hmi1_lost
+        text: Lost on both lines
+        tone: bad
+      - text: Lost on Line 2
+        tone: warn
+  - id: control
+    label: Control
+    states:
+      - when: restored
+        text: Normal, from the HMIs
+        tone: ok
+      - when: shutdown
+        text: Lines stopped safely
+        tone: info
+      - when: manual_ops
+        text: Local panels
+        tone: warn
+      - text: No plan for running blind
+        tone: bad
+  - id: safety_systems
+    label: Safety systems
+    states:
+      - when: safety_checked
+        text: Confirmed independent
+        tone: ok
+      - text: Not checked
+        tone: warn
+  - id: plc
+    label: PLC logic
+    states:
+      - when: logic_verified
+        text: Matches backups
+        tone: ok
+      - text: Unverified
+        tone: warn
+
+attack:
+  - tactic: Lateral Movement
+    technique: T0859
+    name: Valid Accounts
+    note: A stolen office domain admin account (svc_backup) reaches every machine joined to the domain, including the plant HMIs.
+  - tactic: Lateral Movement
+    technique: T0867
+    name: Lateral Tool Transfer
+    note: The ransomware is pushed through the domain to its members.
+  - tactic: Impact
+    technique: T0815
+    name: Denial of View
+    note: The Line 2 HMIs show a ransom screen while the PLCs keep running.
+  - tactic: Impact
+    technique: T0829
+    name: Loss of View
+    note: If the path stays open, Line 1's HMI and the engineering workstation are lost too.
+  - tactic: Impact
+    technique: T0828
+    name: Loss of Productivity and Revenue
+    note: Filling slows or stops while operators run the lines by hand.
 
 solution:
   - cut_it_ot

@@ -1145,3 +1145,149 @@ details summary {
     display: none;
   }
 }
+
+/* ---- status, discussion, attack path ---- */
+
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 20px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.status-label {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.t-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.t-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.t-bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.t-info {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.discuss-tag {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.mail.discuss .mail-from {
+  color: var(--accent);
+}
+
+.questions {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+
+.questions li {
+  margin-bottom: 4px;
+}
+
+.note-label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 6px 0 4px;
+}
+
+.note {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  resize: vertical;
+}
+
+.attack {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attack li {
+  counter-increment: step;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px 8px 44px;
+  position: relative;
+}
+
+.attack li::before {
+  content: counter(step);
+  position: absolute;
+  left: 12px;
+  top: 9px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bad-soft);
+  color: var(--bad);
+  font-weight: 700;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+}
+
+.attack-tactic {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+.attack p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.guide-phase {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.notes-list li {
+  background: var(--panel);
+  border: 1px solid var(--line);
+}

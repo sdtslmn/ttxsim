@@ -11,10 +11,14 @@ import {
   type Inject,
   type Level,
   type Meter,
+  type AttackStep,
   type Objective,
+  type Phase,
   type Rule,
   type Scenario,
+  type StatusItem,
   type TextVariant,
+  type Tone,
 } from "./types.js";
 
 export class ScenarioError extends Error {
@@ -193,6 +197,40 @@ export function loadScenario(source: string, file = ""): Scenario {
     };
   });
 
+  const phases: Phase[] = list(raw.phases).map((x: any, i) => {
+    const where = `phase ${x?.id ?? i + 1}`;
+    if (x?.at === undefined && x?.when === undefined) problems.push(`${where} needs "at" (a time) or "when" (a condition)`);
+    const questions = list(x?.questions).map(String);
+    if (!questions.length) problems.push(`${where} needs at least one question`);
+    return {
+      id: str(x?.id, `${where}: id`, problems),
+      title: str(x?.title, `${where}: title`, problems),
+      at: x?.at === undefined ? undefined : parseDuration(x.at, `${where}: at`, problems),
+      when: typeof x?.when === "string" ? x.when : undefined,
+      text: typeof x?.text === "string" ? x.text.trim() : undefined,
+      questions,
+    };
+  });
+
+  const TONES = ["ok", "warn", "bad", "info"];
+  const status: StatusItem[] = list(raw.status).map((x: any, i) => {
+    const where = `status ${x?.id ?? i + 1}`;
+    const states = list(x?.states).map((st: any, n) => {
+      if (!TONES.includes(st?.tone)) problems.push(`${where}: state ${n + 1} needs tone ok, warn, bad or info`);
+      return { when: typeof st?.when === "string" ? st.when : undefined, text: str(st?.text, `${where}: state ${n + 1} text`, problems), tone: (TONES.includes(st?.tone) ? st.tone : "info") as Tone };
+    });
+    if (!states.length) problems.push(`${where} needs at least one state`);
+    else if (states[states.length - 1].when) problems.push(`${where}: the last state should have no "when"`);
+    return { id: str(x?.id, `${where}: id`, problems), label: str(x?.label, `${where}: label`, problems), states };
+  });
+
+  const attack: AttackStep[] = list(raw.attack).map((x: any, i) => {
+    const where = `attack step ${i + 1}`;
+    const technique = str(x?.technique, `${where}: technique`, problems);
+    if (technique && !/^T\d{4}(\.\d{3})?$/.test(technique)) problems.push(`${where}: technique "${technique}" should look like T0859 or T1692.001`);
+    return { tactic: str(x?.tactic, `${where}: tactic`, problems), technique, name: str(x?.name, `${where}: name`, problems), note: typeof x?.note === "string" ? x.note.trim() : undefined };
+  });
+
   const scenario: Scenario = {
     id: str(raw.id, "id", problems),
     title: str(raw.title, "title", problems),
@@ -215,6 +253,10 @@ export function loadScenario(source: string, file = ""): Scenario {
     objectives,
     solution: list(raw.solution).map(String),
     references: list(raw.references).map(String),
+    phases,
+    status,
+    attack,
+    attackMatrix: raw.attack_matrix === "enterprise" ? "enterprise" : "ics",
   };
 
   problems.push(...checkScenario(scenario));
@@ -300,6 +342,13 @@ export function checkScenario(s: Scenario): string[] {
     }
   }
   for (const r of s.rules) checkExpr(r.when, `rule ${r.id}: when`);
+  const phaseIds = new Set<string>();
+  for (const ph of s.phases) {
+    if (phaseIds.has(ph.id)) problems.push(`phase id "${ph.id}" is used twice`);
+    phaseIds.add(ph.id);
+    checkExpr(ph.when, `phase ${ph.id}: when`);
+  }
+  for (const st of s.status) st.states.forEach((x, n) => checkExpr(x.when, `status ${st.id}: state ${n + 1}`));
   for (const o of s.objectives) checkExpr(o.pass, `objective ${o.id}: pass`);
 
   for (const step of s.solution) {

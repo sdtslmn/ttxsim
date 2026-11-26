@@ -1,6 +1,7 @@
 import { Sim, type LogEntry } from "./engine.js";
 import { identifiers, parse } from "./expr.js";
 import { clockLabel, elapsedLabel } from "./clock.js";
+import { attackMarkdown } from "./attack.js";
 import { CHANNEL_LABELS, GROUP_INFO, type Action, type Group, type Scenario } from "./types.js";
 
 /**
@@ -323,6 +324,22 @@ export function mselMarkdown(flow: Flow): string {
     out.push(r.message.trim());
     out.push("");
   }
+  if (s.phases.length) {
+    out.push("## Discussion phases");
+    out.push("");
+    for (const ph of s.phases) {
+      const when = ph.at !== undefined && !ph.when ? `at ${clockLabel(s, ph.at)}` : ph.at !== undefined ? `at ${clockLabel(s, ph.at)} or later, when ${readableCondition(s, ph.when)}` : `when ${readableCondition(s, ph.when)}`;
+      out.push(`### ${ph.title} (${when})`);
+      out.push("");
+      if (ph.text) {
+        out.push(ph.text.trim());
+        out.push("");
+      }
+      for (const q of ph.questions) out.push(`- ${q}`);
+      out.push("");
+    }
+  }
+  if (s.attack.length) out.push(attackMarkdown(s));
   const traps = flow.steps.flatMap((x) => x.branches.filter((b) => b.kind === "trap"));
   if (traps.length) {
     out.push("## Traps to watch for");

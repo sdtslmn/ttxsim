@@ -97,6 +97,32 @@ export interface Objective {
   miss: string;
 }
 
+export interface Phase {
+  id: string;
+  title: string;
+  at?: number;
+  when?: string;
+  /** Background for the discussion, such as earlier warning signs. */
+  text?: string;
+  questions: string[];
+}
+
+export type Tone = "ok" | "warn" | "bad" | "info";
+
+export interface StatusItem {
+  id: string;
+  label: string;
+  states: { when?: string; text: string; tone: Tone }[];
+}
+
+export interface AttackStep {
+  tactic: string;
+  /** ATT&CK technique ID, for example T0859 or T1692.001. */
+  technique: string;
+  name: string;
+  note?: string;
+}
+
 export interface Scenario {
   id: string;
   title: string;
@@ -121,4 +147,9 @@ export interface Scenario {
   objectives: Objective[];
   solution: string[];
   references: string[];
+  phases: Phase[];
+  status: StatusItem[];
+  attack: AttackStep[];
+  /** Which ATT&CK matrix the attack path uses, for links and labels. */
+  attackMatrix: "ics" | "enterprise";
 }

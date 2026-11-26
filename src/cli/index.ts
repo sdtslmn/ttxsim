@@ -135,12 +135,38 @@ function showEvents(events: LogEntry[]): void {
       say(rule(`${clockLabel(sim.scenario, e.time)} · Done: ${e.title}`));
       if (e.text) say(md(e.text));
       say();
+    } else if (e.kind === "phase") {
+      showPhase(e.ref!);
     } else if (e.kind === "rule") {
       say(c.yellow(`  ${clockLabel(sim.scenario, e.time)}  ${e.title}`));
     } else if (e.kind === "end") {
       showDebrief();
     }
   }
+}
+
+function showPhase(id: string): void {
+  if (!sim) return;
+  const ph = sim.scenario.phases.find((x) => x.id === id);
+  if (!ph) return;
+  say(rule(`Discussion: ${ph.title}`));
+  if (ph.text) {
+    say(md(ph.text));
+    say();
+  }
+  ph.questions.forEach((q, i) => say(`  ${c.cyan(`${i + 1}.`)} ${q}`));
+  say();
+  say(c.dim("  Talk it through, then type note <text> to record your answer. It goes into your report."));
+  say();
+}
+
+function statusLine(): string {
+  if (!sim || !sim.scenario.status.length) return "";
+  const tone = (t: string, x: string) => (t === "ok" ? c.green(x) : t === "bad" ? c.red(x) : t === "warn" ? c.yellow(x) : c.cyan(x));
+  return sim
+    .statusNow()
+    .map((st) => `${c.dim(st.item.label + ":")} ${tone(st.tone, st.text)}`)
+    .join(c.dim("  ·  "));
 }
 
 function showInbox(): void {
@@ -182,6 +208,10 @@ function showStatus(): void {
   for (const m of s.meters) {
     say(`  ${m.label.padEnd(22)} ${bar(sim.meters[m.id], m.good)} ${String(sim.meters[m.id]).padStart(3)}  ${c.dim(m.good === "high" ? "higher is better" : "lower is better")}`);
   }
+  if (s.status.length) {
+    say();
+    say(`  ${statusLine()}`);
+  }
   say();
   say(c.bold("Objectives"));
   for (const o of s.objectives) say(`  - ${o.text}`);
@@ -222,6 +252,11 @@ function showDebrief(): void {
       say(`  ${c.yellow("•")} ${l.action.label}`);
       say(md(l.text, "      "));
     }
+  }
+  if (s.attack.length) {
+    say();
+    say(c.bold(`  Attack path (MITRE ATT&CK${s.attackMatrix === "ics" ? " for ICS" : ""})`));
+    s.attack.forEach((a, i) => say(`  ${i + 1}. ${c.dim(a.tactic.padEnd(26))} ${a.technique} ${a.name}`));
   }
   say();
   say(c.dim(`Type report to save an after-action report, map to see your path, play ${scenarios.indexOf(s) + 1} to try again, or next.`));
@@ -289,6 +324,9 @@ ${c.bold("During an exercise")}
   status                 clock, measures and objectives
   brief                  show the briefing again
   log                    timeline so far
+  discuss                show the current discussion questions again
+  note <text>            record your answer to the current discussion point
+  notes                  show your notes
   end                    finish now and see your debrief
 
 ${c.bold("After an exercise")}
@@ -404,7 +442,10 @@ function run(line: string): boolean {
       const r = sim.act(arg);
       if (!r.ok && !r.events.length) say(c.red(r.error ?? "That didn't work."));
       else showEvents(r.events);
-      if (!sim.ended && r.ok) say(c.dim(`${header()}  Type actions for what's next.`));
+      if (!sim.ended && r.ok) {
+        if (sim.scenario.status.length) say(`  ${statusLine()}`);
+        say(c.dim(`${header()}  Type actions for what's next.`));
+      }
       break;
     }
     case "wait":
@@ -442,6 +483,28 @@ function run(line: string): boolean {
       break;
     case "report":
       writeReport(arg || undefined);
+      break;
+    case "note": {
+      const current = sim.phases[sim.phases.length - 1];
+      if (!current) say("There is no discussion point yet.");
+      else if (!arg) say("Usage: note <your answer>");
+      else {
+        const prev = sim.notes[current.phase.id];
+        sim.setNote(current.phase.id, prev ? `${prev}\n${arg}` : arg);
+        say(c.dim(`Noted under "${current.phase.title}".`));
+      }
+      break;
+    }
+    case "notes":
+      if (!sim.phases.length) say("No discussion points yet.");
+      for (const p of sim.phases) {
+        say(c.bold(p.phase.title));
+        say(sim.notes[p.phase.id] ? md(sim.notes[p.phase.id]) : c.dim("  No notes yet."));
+      }
+      break;
+    case "discuss":
+      if (!sim.phases.length) say("No discussion points yet.");
+      else showPhase(sim.phases[sim.phases.length - 1].phase.id);
       break;
     default:
       say(`Unknown command "${cmd}". Type help.`);

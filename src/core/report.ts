@@ -1,6 +1,7 @@
 import type { Debrief, Sim } from "./engine.js";
 import { clockLabel, duration } from "./clock.js";
 import { buildFlow, overlayPath } from "./flow.js";
+import { attackMarkdown } from "./attack.js";
 import { GROUP_INFO, GROUPS, type Scenario } from "./types.js";
 
 export { clockLabel, duration, elapsedLabel } from "./clock.js";
@@ -45,6 +46,29 @@ export function reportMarkdown(sim: Sim, when = new Date()): string {
     lines.push("| --- | ---: | ---: | --- |");
     for (const m of d.meters) lines.push(`| ${m.label} | ${m.start} | ${m.value} | ${m.good === "high" ? "higher" : "lower"} |`);
     lines.push("");
+  }
+  const status = sim.statusNow();
+  if (status.length) {
+    lines.push("| Status | At the end |");
+    lines.push("| --- | --- |");
+    for (const st of status) lines.push(`| ${st.item.label} | ${st.text} |`);
+    lines.push("");
+  }
+  if (s.phases.length) {
+    lines.push("## Discussion notes");
+    lines.push("");
+    for (const ph of s.phases) {
+      const reached = sim.phases.find((x) => x.phase.id === ph.id);
+      lines.push(`### ${ph.title}${reached ? ` (${clockLabel(s, reached.time)})` : " (not reached)"}`);
+      lines.push("");
+      for (const q of ph.questions) lines.push(`- ${q}`);
+      lines.push("");
+      lines.push(sim.notes[ph.id] ? `**Notes:** ${sim.notes[ph.id].trim()}` : "_No notes recorded._");
+      lines.push("");
+    }
+  }
+  if (s.attack.length) {
+    lines.push(attackMarkdown(s));
   }
   lines.push("## Response activity by NIST CSF 2.0 category");
   lines.push("");

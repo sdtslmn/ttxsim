@@ -296,6 +296,96 @@ objectives:
     hit: The authorities and the director are informed.
     miss: The authorities or the director were left out.
 
+phases:
+  - id: earlier_signs
+    title: Earlier warning signs
+    at: 0
+    text: |
+      Looking back:
+
+      - Two months ago TurboTech asked for the always-on VPN "to cut callout
+        times". It was approved by email.
+      - Last month a TurboTech engineer didn't turn up for a scheduled CS-5
+        visit, yet the work order was closed as done.
+      - The OT monitor flagged a short engineering session two nights ago. It
+        was assumed to be TurboTech testing.
+    questions:
+      - Who approves vendor remote access, and who reviews how it is used?
+      - Would anyone have questioned the closed work order or the night session?
+
+  - id: shut_out
+    title: Shutting the vendor out
+    when: vendor_disabled or time >= 30
+    questions:
+      - Who can disable a vendor's access at 3 a.m. without waiting for the contract owner?
+      - How do you confirm with the vendor through a channel you trust?
+      - Which other stations does the same access reach?
+
+  - id: restore
+    title: Restoring and keeping maintenance going
+    when: cs3_change_found or time >= 3h
+    questions:
+      - How do you prove each station's controller matches a known-good backup?
+      - What must a vendor's remote access look like before tomorrow's maintenance?
+      - What does the contract require TurboTech to tell you, and how fast?
+
+status:
+  - id: vendor
+    label: Vendor access
+    states:
+      - when: reenabled
+        text: Old account re-enabled
+        tone: bad
+      - when: supervised_access
+        text: Supervised route only
+        tone: ok
+      - when: vendor_disabled
+        text: Disabled
+        tone: ok
+      - text: Open
+        tone: bad
+  - id: cs3
+    label: CS-3 anti-surge
+    states:
+      - when: cs3_restored
+        text: Restored and checked
+        tone: ok
+      - when: cs3_change_found
+        text: Margin cut to 2%
+        tone: bad
+      - text: Unverified
+        tone: warn
+  - id: gas_control
+    label: Gas control
+    states:
+      - when: watching
+        text: Watching CS-3 surge margin
+        tone: info
+      - text: Normal watch
+        tone: warn
+
+attack:
+  - tactic: Initial Access
+    technique: T0822
+    name: External Remote Services
+    note: TurboTech's always-on VPN into the station networks.
+  - tactic: Persistence
+    technique: T0859
+    name: Valid Accounts
+    note: Vendor credentials stolen in the breach of TurboTech's support environment.
+  - tactic: Collection
+    technique: T0845
+    name: Program Upload
+    note: Two nights earlier the account read the controller program and parameters.
+  - tactic: Impair Process Control
+    technique: T0836
+    name: Modify Parameter
+    note: The anti-surge control margin on CS-3 is cut from 10% to 2%.
+  - tactic: Impact
+    technique: T0879
+    name: Damage to Property
+    note: A surge could damage the compressor and stop deliveries.
+
 solution:
   - disable_vendor
   - kill_session
