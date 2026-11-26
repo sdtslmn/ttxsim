@@ -174,9 +174,9 @@ describe("the engine", () => {
 describe("built-in scenarios", () => {
   const scenarios = builtinScenarios();
 
-  it("ships twelve scenarios with unique ids", () => {
-    assert.equal(scenarios.length, 12);
-    assert.equal(new Set(scenarios.map((s) => s.id)).size, 12);
+  it("ships fifteen scenarios with unique ids", () => {
+    assert.equal(scenarios.length, 15);
+    assert.equal(new Set(scenarios.map((s) => s.id)).size, 15);
   });
 
   for (const s of scenarios) {

@@ -1,0 +1,445 @@
+id: pump-station-intrusion
+title: The fence at Pump Station 7
+level: ot
+minutes: 25
+sector: Water transmission
+org: Wadi Crest Water Transmission (fictional)
+role: You are the OT security lead, woken by the control room.
+summary: Intruders cut the fence at an unmanned pump station and plug something into the network. Then a familiar voice calls the control room asking for door codes.
+start: Sun 01:50
+limit: 6h
+pass: 70
+
+briefing: |
+  Wadi Crest moves treated water from a coastal plant to three cities through
+  a pipeline with eleven unmanned pump stations. Each station has a PLC, a
+  small network switch, cameras and door alarms, all linked back to the
+  control centre.
+
+  Door and cabinet codes are the same at several stations and are kept in the
+  control room. Field technicians are on call at night.
+
+meters:
+  safety:
+    label: Staff and site safety
+    start: 90
+    good: high
+  spread:
+    label: Attacker reach
+    start: 30
+    good: low
+  supply:
+    label: Water supply disruption
+    start: 0
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+
+injects:
+  - id: perimeter_alarm
+    at: 0
+    from: Security monitoring
+    via: alert
+    subject: "PS-7: fence and door alarms"
+    body: |
+      Perimeter fence alarm at **Pump Station 7**, then the control building
+      door contact opened at 01:47. The camera snapshot shows two people in
+      high-visibility vests inside the fence. No work is scheduled.
+
+  - id: rogue_device
+    at: 15
+    when: not ps7_isolated
+    from: OT network monitor
+    via: alert
+    subject: "PS-7: new device scanning for Modbus"
+    body: |
+      A device the monitor has never seen appeared on the PS-7 station switch
+      at 01:56. It is scanning the station network on TCP 502 and reading
+      registers from the pump PLC.
+    effects:
+      set: [rogue_active]
+      spread: 15
+
+  - id: pump_tamper
+    at: 30
+    when: rogue_active and not ps7_isolated
+    from: Noor Saeed, Control Room Operator
+    via: call
+    subject: PS-7 pump speed jumped
+    body: |
+      "PS-7's duty pump just ramped up and down by itself. We saw a pressure
+      surge down the line. Nobody here touched it."
+    effects:
+      set: [pump_tampered]
+      supply: 15
+      safety: -10
+
+  - id: vishing_call
+    at: 40
+    from: Noor Saeed, Control Room Operator
+    via: chat
+    subject: Karim is asking for door codes
+    body: |
+      Karim from maintenance just called the control room. He sounded like
+      himself, a bit rushed. He says he's sending a crew to PS-9 and PS-11 for
+      "urgent checks after the PS-7 break-in" and needs the door and cabinet
+      codes. Shall I read them out?
+
+  - id: police_onsite
+    when: did.call_police and time >= at.call_police + 45m
+    from: Police patrol
+    via: call
+    subject: Police at PS-7
+    body: |
+      "We're at Pump Station 7. Nobody here now. The fence is cut and the
+      building door was forced. There's a small box with two antennas plugged
+      into the network cabinet. We haven't touched it."
+
+  - id: second_intrusion
+    at: 100
+    when: codes_leaked and not codes_changed
+    from: Security monitoring
+    via: alert
+    subject: "PS-9: door opened with a valid code"
+    body: |
+      The PS-9 control building door was opened with a valid keypad code at
+      03:28. No crew is scheduled there.
+    effects:
+      spread: 20
+      supply: 10
+
+actions:
+  - id: call_police
+    group: coordinate
+    label: Call the police and ask them to attend PS-7
+    takes: 10
+    result: The police are sending a patrol. They ask that nobody from your side goes in before they arrive.
+    effects:
+      set: [police_called]
+
+  - id: keep_staff_away
+    group: operations
+    label: Tell field staff not to go to PS-7 until the police have been
+    takes: 5
+    result: The on-call technician is told to wait at the depot and stay reachable.
+    effects:
+      set: [staff_safe]
+
+  - id: send_technician
+    group: operations
+    label: Send the on-call technician to PS-7 now to see what's going on
+    takes: 5
+    result: The technician arrives as the two people are leaving. They shout at him and drive off. He's shaken but unhurt.
+    effects:
+      set: [tech_sent]
+      safety: -30
+    lesson: |
+      Never send a lone worker into a site where intruders may still be. Call
+      the police first and keep staff away until it's safe. A cyber incident can
+      put people in physical danger.
+
+  - id: isolate_ps7
+    group: contain
+    label: Block PS-7's network link at the control centre
+    takes: 10
+    result: PS-7 is cut off from the rest of the network. You lose remote view of the station, but whatever is plugged in there can't reach anything else.
+    effects:
+      set: [ps7_isolated]
+      spread: -15
+
+  - id: pumps_local
+    group: operations
+    label: Switch PS-7 to local automatic control and raise the reserve in the downstream reservoir
+    takes: 10
+    result: PS-7 runs on its own PLC logic and the downstream reservoir is filled higher as a buffer. Supply is safe for the next 18 hours even if PS-7 stops.
+    effects:
+      set: [pumps_safe]
+      supply: -5
+
+  - id: review_camera
+    group: investigate
+    label: Review the camera footage and door logs at PS-7
+    takes: 10
+    result: Two people, nine minutes inside. One opened the network cabinet straight away, as if they knew where it was. They left at 01:58.
+    effects:
+      set: [footage_reviewed]
+
+  - id: monitor_review
+    group: investigate
+    label: Check the OT monitor for everything the new device did at PS-7
+    takes: 15
+    result:
+      - when: pump_tampered
+        text: The device scanned the station, read the pump PLC's registers and wrote a new speed setpoint twice. It talks out over a cellular modem.
+      - text: The device scanned the station and read the pump PLC's registers. It has a cellular modem, so someone can reach it from outside. It stopped when you isolated the link.
+    effects:
+      set: [rogue_known]
+
+  - id: warn_control_room
+    group: coordinate
+    label: Warn the control room that no codes or details go out by phone without a call back
+    takes: 5
+    result: The control room staff confirm. Anyone asking for codes or access tonight gets a call back on a known number first.
+    effects:
+      set: [staff_warned]
+
+  - id: verify_caller
+    group: investigate
+    when: seen.vishing_call
+    label: Call Karim back on the number in the staff directory
+    takes: 5
+    result: Karim answers, half asleep. He never called the control room and has no crew going anywhere tonight. The voice was a fake.
+    effects:
+      set: [caller_checked]
+
+  - id: change_codes
+    group: contain
+    label: Change the door and cabinet codes at every pump station
+    takes: 15
+    result: All codes are changed remotely on the keypads, and the new codes go only to named technicians.
+    effects:
+      set: [codes_changed]
+
+  - id: remove_device
+    group: recover
+    when: seen.police_onsite
+    label: With the police present, photograph, bag and remove the device from the cabinet
+    takes: 20
+    result: The device, a small cellular router, is photographed in place, removed and handed to the police with a chain of custody form.
+    effects:
+      set: [device_removed]
+
+  - id: verify_ps7
+    group: recover
+    when: device_removed
+    label: Compare the PS-7 PLC logic and setpoints with the known-good backup
+    takes: 30
+    result:
+      - when: pump_tampered
+        text: The logic matches the backup. One speed setpoint was changed and is now put back.
+      - text: The PLC logic and setpoints match the backup.
+    effects:
+      set: [ps7_verified]
+
+  - id: reconnect_ps7
+    group: recover
+    when: ps7_verified
+    label: Reconnect PS-7 to the control centre
+    takes: 10
+    result: PS-7 is back on the network and under normal remote control.
+    effects:
+      set: [ps7_restored]
+
+  - id: check_other_sites
+    group: investigate
+    label: Check cameras, door logs and switch ports at the other pump stations
+    takes: 30
+    result: No other station shows a new device or an unexplained door opening tonight.
+    effects:
+      set: [others_checked]
+
+  - id: notify_authority
+    group: communicate
+    label: Report to the water regulator and the national cyber authority
+    takes: 20
+    result: Both reports are filed. The national authority asks to see the device once the police release it.
+    effects:
+      set: [authority_told]
+
+  - id: close
+    group: coordinate
+    when: ps7_isolated
+    label: Hand over to the day team and close the night response
+    takes: 10
+    result: You hand over to the day team.
+    effects:
+      end:
+        outcome: close
+        text: You handed over to the day team.
+
+rules:
+  - id: device_active
+    when: rogue_active and not ps7_isolated
+    every: 15
+    effects:
+      spread: 5
+
+  - id: codes_given
+    when: time >= 55 and seen.vishing_call and not caller_checked and not staff_warned
+    effects:
+      set: [codes_leaked]
+    text: The control room operator reads out the PS-9 and PS-11 door codes to the caller.
+
+phases:
+  - id: earlier_signs
+    title: Earlier warning signs
+    at: 0
+    text: |
+      Looking back:
+
+      - Last month a drone was reported over PS-7 and PS-9. It was logged as a
+        hobbyist.
+      - The same door codes are used at several stations and haven't changed in
+        two years.
+      - Station switches have spare ports that are live, so anything plugged in
+        gets on the network.
+    questions:
+      - Who connects physical security reports with cyber risk in your organization?
+      - Would anyone notice a new device on a station switch, and how fast?
+
+  - id: physical_and_cyber
+    title: Physical and cyber at once
+    when: ps7_isolated or time >= 30
+    questions:
+      - Who leads when an incident is both a break-in and a cyber attack, security or OT?
+      - What is your rule for sending staff to a site that may still have intruders?
+      - How would your control room spot a social engineering call?
+
+  - id: restore
+    title: Getting the station back
+    when: device_removed or time >= 3h
+    questions:
+      - How do you handle a rogue device so it can be used as evidence?
+      - What has to be checked before the station is reconnected?
+      - What would you change at every station after tonight (ports, codes, cameras)?
+
+status:
+  - id: site
+    label: PS-7 site
+    states:
+      - when: device_removed
+        text: Secured, device removed
+        tone: ok
+      - when: seen.police_onsite
+        text: Police on site
+        tone: info
+      - text: Intruders may be inside
+        tone: bad
+  - id: link
+    label: PS-7 network link
+    states:
+      - when: ps7_restored
+        text: Reconnected after checks
+        tone: ok
+      - when: ps7_isolated
+        text: Isolated
+        tone: ok
+      - text: Connected
+        tone: bad
+  - id: pumps
+    label: PS-7 pumps
+    states:
+      - when: pumps_safe
+        text: Local automatic, reserve raised
+        tone: info
+      - when: pump_tampered
+        text: Speed changed remotely
+        tone: bad
+      - text: Remote control from the centre
+        tone: warn
+  - id: codes
+    label: Site access codes
+    states:
+      - when: codes_changed
+        text: Changed
+        tone: ok
+      - when: codes_leaked
+        text: Given to a caller
+        tone: bad
+      - text: Unchanged
+        tone: warn
+
+attack:
+  - tactic: Initial Access
+    technique: T0864
+    name: Transient Cyber Asset
+    note: A small cellular router is plugged into the station switch, giving remote access from outside.
+  - tactic: Discovery
+    technique: T0846
+    name: Remote System Discovery
+    note: The device scans the station network for Modbus devices.
+  - tactic: Collection
+    technique: T0861
+    name: Point & Tag Identification
+    note: It reads the pump PLC's registers to learn what each one does.
+  - tactic: Impair Process Control
+    technique: T0836
+    name: Modify Parameter
+    note: A pump speed setpoint is written remotely if the link stays open.
+  - tactic: Impact
+    technique: T0831
+    name: Manipulation of Control
+    note: The pump ramps up and down and a pressure surge runs down the pipeline.
+
+objectives:
+  - text: Keep people safe
+    pass: staff_safe and not tech_sent
+    weight: 3
+    hit: You kept staff away until the police had been. Nobody walked into the intruders.
+    miss: Staff were put at risk, or nobody told them to stay away from PS-7.
+
+  - text: Cut the intruders' network foothold within 30 minutes
+    pass: ps7_isolated and at.isolate_ps7 <= 30
+    weight: 3
+    hit: You isolated PS-7 fast, so the device couldn't reach anything else.
+    miss: The device stayed connected to the network too long.
+
+  - text: Keep the water flowing safely
+    pass: pumps_safe
+    weight: 1
+    hit: The station ran on local automatic with a reservoir buffer.
+    miss: You didn't secure supply in case PS-7 stopped or misbehaved.
+
+  - text: Spot the phone scam
+    pass: (caller_checked or staff_warned) and not codes_leaked
+    weight: 2
+    hit: The fake call got nothing. A call back on a known number is the simplest defence.
+    miss: The caller got the codes, or nobody checked who was really calling.
+
+  - text: Handle the device as evidence
+    pass: device_removed
+    weight: 1
+    hit: The device was photographed, removed and handed over with the police present.
+    miss: The device was never properly removed and preserved.
+
+  - text: Prove the station is clean before reconnecting it
+    pass: ps7_verified and ps7_restored
+    weight: 2
+    hit: You checked the PLC against its backup before bringing PS-7 back.
+    miss: PS-7 wasn't checked and reconnected.
+
+  - text: Check the other sites and change the codes
+    pass: others_checked and codes_changed
+    weight: 1
+    hit: The other stations are clear and every code is new.
+    miss: Other stations or the shared codes were left as they were.
+
+  - text: Report to the police and the authorities
+    pass: police_called and authority_told
+    weight: 1
+    hit: The police and the authorities were involved.
+    miss: The police or the authorities were left out.
+
+solution:
+  - call_police
+  - keep_staff_away
+  - isolate_ps7
+  - pumps_local
+  - warn_control_room
+  - verify_caller
+  - review_camera
+  - monitor_review
+  - change_codes
+  - remove_device
+  - verify_ps7
+  - reconnect_ps7
+  - check_other_sites
+  - notify_authority
+  - close
+
+references:
+  - SANS, Top 5 ICS Incident Response Tabletop Scenarios (physical access to cyber access)
+  - CISA, Cybersecurity and Physical Security Convergence guide
+  - NIST SP 800-82r3, Guide to Operational Technology (OT) Security

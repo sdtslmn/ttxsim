@@ -1,0 +1,444 @@
+id: historian-pivot
+title: Through the historian
+level: ot
+minutes: 25
+sector: Power and desalination
+org: Gulfside Power and Water (fictional)
+role: You are the OT security lead for the plant.
+summary: An attacker in the office network rides the historian link into the plant and reaches an engineering workstation. Cut the path without losing the reports the regulator needs.
+start: Tue 10:30
+limit: 8h
+pass: 70
+
+briefing: |
+  Gulfside runs a combined power and desalination plant. Gas turbines make
+  power, and reverse osmosis (RO) trains make drinking water. A plant
+  historian on the OT network collects process data and replicates it through
+  the DMZ to a corporate historian, which feeds management dashboards and the
+  daily water-quality report sent to the regulator.
+
+  The replication uses a service account called **hist_sync**. It exists in
+  both the office domain and the OT domain, with the same password.
+
+  Engineering workstations (EWS) in the plant hold the PLC projects for the
+  turbines and the RO trains.
+
+meters:
+  spread:
+    label: Attacker reach in OT
+    start: 35
+    good: low
+  output:
+    label: Water and power output at risk
+    start: 0
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+
+injects:
+  - id: rdp_alert
+    at: 0
+    from: OT network monitor
+    via: alert
+    subject: New remote desktop path from the historian to EWS-1
+    body: |
+      **OT-HIST-01** opened a remote desktop session to **EWS-1** using the
+      account **hist_sync** at 10:26. This path has never been seen before.
+      The historian also received an unusual number of logins over its
+      replication link from the DMZ in the last hour.
+
+  - id: soc_note
+    at: 10
+    from: IT security operations centre
+    via: email
+    subject: Phishing incident on the office network
+    body: |
+      FYI, we're working a phishing incident on the office network since
+      yesterday. One of the compromised machines is **IT-HIST-02**, the
+      corporate historian, which has a new scheduled task. We didn't think it
+      affected the plant.
+
+  - id: new_account
+    at: 20
+    when: not replication_cut and not hist_sync_disabled
+    from: OT domain controller
+    via: alert
+    subject: "New account in the OT domain: svc_support"
+    body: An account called **svc_support** was created in the OT domain by hist_sync and added to the engineering group.
+    effects:
+      set: [ot_backdoor]
+      spread: 10
+
+  - id: project_read
+    at: 35
+    when: not ews_isolated
+    from: OT network monitor
+    via: alert
+    subject: PLC project files opened on EWS-1
+    body: The project files for the **RO train 2** PLCs were opened on EWS-1 from the remote session. The PLC programming software was started.
+    effects:
+      set: [projects_read]
+      spread: 10
+
+  - id: ops_question
+    at: 60
+    when: replication_cut
+    from: Hessa Al Mansoori, Operations Manager
+    via: call
+    subject: The trends have stopped
+    body: |
+      "Management dashboards froze and the lab says the corporate historian
+      has no data since this morning. The water-quality report goes to the
+      regulator at 16:00. How do we do that without the historian link?"
+
+  - id: kerberos_alert
+    at: 75
+    when: not replication_cut and not hist_sync_disabled and not ot_creds_reset
+    from: OT domain controller
+    via: alert
+    subject: Kerberos tickets requested for every admin account
+    body: Someone is requesting service tickets for all OT admin and service accounts. This looks like an attacker collecting credentials to crack offline.
+    effects:
+      set: [tickets_harvested]
+      spread: 15
+
+  - id: reentered
+    when: did.reconnect_now and not ot_creds_reset
+    from: OT network monitor
+    via: alert
+    subject: hist_sync is back
+    body: Minutes after the replication link came back, hist_sync logged in to OT-HIST-01 again from the DMZ. The attacker still has the password.
+    effects:
+      spread: 20
+
+actions:
+  - id: cut_replication
+    group: contain
+    when: not replication_cut
+    label: Block the historian replication path at the DMZ firewall
+    takes: 5
+    result: Nothing crosses between the office network and the OT historian now. Corporate dashboards and the lab's data feed stop updating.
+    effects:
+      set: [replication_cut]
+      spread: -15
+
+  - id: isolate_ews
+    group: contain
+    label: Disconnect EWS-1 from the network but leave it powered on
+    takes: 5
+    result: EWS-1 is off the network with its memory intact.
+    effects:
+      set: [ews_isolated]
+      spread: -10
+
+  - id: disable_hist_sync
+    group: contain
+    label: Disable the hist_sync account in both domains
+    takes: 5
+    result: hist_sync is disabled in the office and OT domains. Replication would fail now even if the path were open.
+    effects:
+      set: [hist_sync_disabled]
+      spread: -10
+
+  - id: scope_activity
+    group: investigate
+    label: Trace everything hist_sync did in the OT domain over the last two weeks
+    takes: 30
+    result:
+      - when: ot_backdoor
+        text: hist_sync first logged in to the OT historian interactively nine days ago. Today it opened remote desktop to EWS-1 and created a new account, svc_support, in the engineering group.
+      - text: hist_sync first logged in to the OT historian interactively nine days ago. Today it opened remote desktop to EWS-1. Nothing else was created.
+    effects:
+      set: [scoped]
+
+  - id: remove_backdoor
+    group: contain
+    when: scoped and ot_backdoor
+    label: Delete the svc_support account and check group memberships
+    takes: 10
+    result: svc_support is gone and the engineering group is back to its known members.
+    effects:
+      set: [backdoor_removed]
+      spread: -10
+
+  - id: reset_ot_creds
+    group: contain
+    when: scoped
+    label: Reset every OT admin and service account, and reset the OT domain's Kerberos key twice
+    takes: 1h
+    result: All privileged OT credentials are new. Anything the attacker collected is now useless.
+    effects:
+      set: [ot_creds_reset]
+      spread: -15
+
+  - id: image_ews
+    group: investigate
+    when: ews_isolated
+    label: Capture memory and a disk image of EWS-1
+    takes: 40
+    result: Memory and disk images of EWS-1 are saved and hashed.
+    effects:
+      set: [ews_imaged]
+
+  - id: verify_plcs
+    group: investigate
+    label: Compare the RO train and turbine PLC programs with the offline backups
+    takes: 45
+    result: Every PLC program matches its offline backup. The attacker read the projects but did not change any controller.
+    effects:
+      set: [plcs_verified]
+
+  - id: manual_reporting
+    group: operations
+    label: Have operators and the lab record water-quality values by hand for today's report
+    takes: 20
+    result: The lab and the control room log the values the regulator needs every hour on paper and in a spreadsheet.
+    effects:
+      set: [manual_reports]
+
+  - id: brief_ops
+    group: communicate
+    label: Brief the operations manager on why the historian link is down and for how long
+    takes: 15
+    result: Hessa accepts a day without dashboards. She asks to be told before anything is reconnected.
+    effects:
+      set: [ops_briefed]
+
+  - id: notify_regulator
+    group: communicate
+    label: Tell the regulator that today's water-quality report will come from manual logs
+    takes: 20
+    result: The regulator accepts manual logs for today and asks for the incident report within 72 hours.
+    effects:
+      set: [regulator_told]
+
+  - id: separate_accounts
+    group: recover
+    label: Remove accounts that exist in both domains and give each domain its own service accounts
+    takes: 30
+    result: No account works in both the office and OT domains any more.
+    effects:
+      set: [accounts_separated]
+
+  - id: rebuild_one_way
+    group: recover
+    when: replication_cut and ot_creds_reset and accounts_separated
+    label: Rebuild historian data flow one way, from the OT historian to a DMZ mirror that corporate reads
+    takes: 2h
+    result: The OT historian now pushes data to a mirror in the DMZ. Corporate reads the mirror. Nothing can log in from the office side to the plant.
+    effects:
+      set: [one_way]
+
+  - id: reconnect_now
+    group: recover
+    when: replication_cut and not one_way
+    label: Reconnect the historian link as it was, so the dashboards come back
+    takes: 5
+    result: The old replication link is back and the dashboards refresh.
+    lesson: |
+      The link came back with the same account and the same trust. Before
+      reconnecting, the attacker's credentials have to be dead and the path has
+      to be rebuilt so the office side can't log in to the plant.
+
+  - id: close
+    group: coordinate
+    when: replication_cut and ews_isolated
+    label: Hand over to the investigation team and close the response
+    takes: 10
+    result: You hand over to the investigation team.
+    effects:
+      end:
+        outcome: close
+        text: The path is closed and the investigation continues with the images.
+
+rules:
+  - id: path_open
+    when: not replication_cut and not hist_sync_disabled
+    every: 15
+    effects:
+      spread: 5
+
+  - id: plc_changed
+    when: time >= 2h and not ews_isolated
+    effects:
+      end:
+        outcome: fail
+        text: The attacker downloads modified logic to an RO train 2 PLC from EWS-1. The train trips on high pressure and water output drops by a third.
+
+phases:
+  - id: earlier_signs
+    title: Earlier warning signs
+    at: 0
+    text: |
+      Looking back:
+
+      - The historian replication was set up by a vendor years ago. Nobody is
+        sure who owns the hist_sync account.
+      - An architecture review flagged accounts that exist in both domains. It
+        was marked "accept risk" because of the reporting deadline.
+      - The OT monitor has shown occasional logins to OT-HIST-01 from the DMZ
+        outside the replication schedule for over a week.
+    questions:
+      - Who owns the accounts and data flows that cross from IT to OT, and who reviews them?
+      - Who decided to accept the shared-account risk, and would they decide the same today?
+
+  - id: trade_off
+    title: Cutting the link
+    when: replication_cut or time >= 30
+    questions:
+      - Who can order the historian link cut, knowing management and the regulator depend on it?
+      - How long can you run without historian data, and what replaces it?
+      - Does the IT SOC tell the plant when an IT incident touches a system that links to OT?
+
+  - id: rebuild
+    title: Rebuilding trust
+    when: ot_creds_reset or time >= 4h
+    questions:
+      - What is the safe design for data leaving the plant (one-way flow, DMZ mirror, data diode)?
+      - How do you prove the controllers were not changed?
+      - What will you tell the regulator, and when?
+
+status:
+  - id: path
+    label: IT to OT historian path
+    states:
+      - when: one_way
+        text: One way only
+        tone: ok
+      - when: did.reconnect_now
+        text: Reconnected as before
+        tone: bad
+      - when: replication_cut
+        text: Cut
+        tone: ok
+      - text: Open
+        tone: bad
+  - id: ews
+    label: EWS-1
+    states:
+      - when: ews_isolated
+        text: Isolated
+        tone: ok
+      - when: projects_read
+        text: Attacker reading PLC projects
+        tone: bad
+      - text: Connected
+        tone: warn
+  - id: domain
+    label: OT domain
+    states:
+      - when: ot_creds_reset
+        text: Credentials reset
+        tone: ok
+      - when: tickets_harvested
+        text: Admin tickets harvested
+        tone: bad
+      - text: Shares an account with IT
+        tone: warn
+  - id: reports
+    label: Regulator report
+    states:
+      - when: one_way
+        text: Back on historian data
+        tone: ok
+      - when: manual_reports
+        text: Manual logs
+        tone: info
+      - when: replication_cut
+        text: No data feed
+        tone: warn
+      - text: Normal
+        tone: ok
+
+attack:
+  - tactic: Lateral Movement
+    technique: T0859
+    name: Valid Accounts
+    note: hist_sync has the same password in both domains. The attacker takes it from the compromised corporate historian.
+  - tactic: Lateral Movement
+    technique: T0886
+    name: Remote Services
+    note: From the OT historian, remote desktop to EWS-1.
+  - tactic: Collection
+    technique: T0893
+    name: Data from Local System
+    note: The RO train PLC projects are opened on EWS-1.
+  - tactic: Lateral Movement
+    technique: T0843
+    name: Program Download
+    note: The next step would be downloading modified logic to an RO train PLC.
+  - tactic: Impact
+    technique: T0826
+    name: Loss of Availability
+    note: A tripped RO train cuts water output.
+
+objectives:
+  - text: Cut the IT to OT path within 15 minutes
+    pass: replication_cut and at.cut_replication <= 15
+    weight: 3
+    hit: You blocked the historian path before the attacker could dig in.
+    miss: The historian path stayed open while the attacker worked inside the plant.
+
+  - text: Protect the engineering workstation
+    pass: ews_isolated and at.isolate_ews <= 30
+    weight: 2
+    hit: EWS-1 came off the network before the attacker could use the PLC software.
+    miss: The attacker kept access to the engineering workstation too long.
+
+  - text: Find and remove what the attacker left behind
+    pass: scoped and hist_sync_disabled and (not ot_backdoor or backdoor_removed)
+    weight: 2
+    hit: You traced the account's activity, disabled it and removed anything it created.
+    miss: The attacker's account or backdoor was left in place.
+
+  - text: Take back the OT domain
+    pass: ot_creds_reset and accounts_separated
+    weight: 2
+    hit: OT credentials are reset and no account spans both domains any more.
+    miss: Shared or possibly stolen credentials still work in the OT domain.
+
+  - text: Prove the controllers are clean
+    pass: plcs_verified
+    weight: 2
+    hit: The PLC programs match their offline backups.
+    miss: Nobody checked whether the controllers had been changed.
+
+  - text: Keep the regulator's reports going without the link
+    pass: manual_reports and regulator_told
+    weight: 1
+    hit: Manual logs kept the water-quality report on time, and the regulator knew why.
+    miss: The regulator's report was left to chance.
+
+  - text: Rebuild the data flow one way, not the old way
+    pass: one_way and not did.reconnect_now
+    weight: 2
+    hit: Data now leaves the plant one way, and nothing logs in from the office side.
+    miss: The link was reconnected as before, or never rebuilt safely.
+
+  - text: Keep the evidence
+    pass: ews_imaged
+    weight: 1
+    hit: EWS-1 was captured before anything else happened to it.
+    miss: EWS-1 was never imaged.
+
+solution:
+  - cut_replication
+  - isolate_ews
+  - disable_hist_sync
+  - brief_ops
+  - scope_activity
+  - reset_ot_creds
+  - image_ews
+  - verify_plcs
+  - manual_reporting
+  - notify_regulator
+  - separate_accounts
+  - rebuild_one_way
+  - close
+
+references:
+  - SANS, Top 5 ICS Incident Response Tabletop Scenarios (network pivot from IT to OT via the data historian)
+  - ISA/IEC 62443-3-3 on zones, conduits and restricted data flow
+  - NIST SP 800-82r3, Guide to Operational Technology (OT) Security

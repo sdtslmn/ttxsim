@@ -1,0 +1,463 @@
+id: substation-commands
+title: Breakers that open themselves
+level: ot
+minutes: 25
+sector: Electricity transmission
+org: Coastal Power Transmission (fictional)
+role: You are the OT security lead at the transmission control centre, on call tonight.
+summary: Substation breakers open with nobody at the controls. Someone is speaking the grid's own protocol. Find the source, keep the grid stable and stop it spreading.
+start: Wed 19:40
+limit: 6h
+pass: 70
+
+briefing: |
+  Coastal Power Transmission runs the high-voltage grid for a coastal region.
+  The control centre's SCADA front-end sends commands to remote terminal units
+  (RTUs) in each substation over **IEC 60870-5-104**. Each substation also has
+  a station computer for local engineering and monitoring.
+
+  The RTUs accept commands from any device on the station network. That was
+  on the list to fix next year.
+
+  It is the evening peak. Losing several substations at once could push the
+  grid into automatic load shedding.
+
+meters:
+  stability:
+    label: Grid stability
+    start: 80
+    good: high
+  supply:
+    label: Customers without power
+    start: 20
+    good: low
+  spread:
+    label: Attacker reach
+    start: 40
+    good: low
+  evidence:
+    label: Evidence kept
+    start: 100
+    good: high
+
+injects:
+  - id: breakers_open
+    at: 0
+    from: Lina Haddad, Shift Engineer, Control Room
+    via: call
+    subject: North-7 breakers opened by themselves
+    body: |
+      "Two breakers at North-7 just opened and about 38,000 customers are off.
+      Nobody here sent a command. The SCADA log shows the commands coming in,
+      but not from our consoles. What is going on?"
+
+  - id: monitor_alert
+    at: 5
+    from: OT network monitor
+    via: alert
+    subject: "IEC-104 control commands from an unexpected source at North-7"
+    body: |
+      Single and double command messages to the North-7 RTU are coming from
+      **10.40.7.25**, which is not one of the SCADA front-ends. The same device
+      scanned the station network at 19:31.
+
+  - id: n9_hit
+    at: 25
+    when: not station_isolated and not allowlist
+    from: Lina Haddad, Shift Engineer, Control Room
+    via: call
+    subject: Now North-9 as well
+    body: |
+      "North-9 just lost two feeders the same way. That's another 22,000
+      customers. Frequency dipped. If a third one goes I'll have to start
+      shedding load."
+    effects:
+      set: [n9_hit]
+      supply: 20
+      stability: -15
+
+  - id: reopened
+    when: did.remote_close and not station_isolated
+    from: Lina Haddad, Shift Engineer, Control Room
+    via: call
+    subject: They opened again
+    body: |
+      "We closed the North-7 breakers from SCADA like you said. Forty seconds
+      later they opened again. Whatever this is, it's faster than us."
+    effects:
+      supply: 5
+      stability: -10
+
+  - id: n12_hit
+    at: 75
+    when: not allowlist and not n12_isolated
+    from: OT network monitor
+    via: alert
+    subject: "Unexpected IEC-104 commands at North-12"
+    body: |
+      The station computer at North-12 has started sending command messages to
+      its RTU. Two breakers have opened. This device had been quiet until now.
+    effects:
+      set: [n12_hit]
+      supply: 15
+      stability: -15
+
+  - id: wiped
+    at: 100
+    when: not n7_imaged
+    from: Station engineer, North-7
+    via: call
+    subject: The station computer won't start
+    body: |
+      "N7-STN-PC rebooted itself and now says no operating system found. The
+      disk looks blank."
+    effects:
+      set: [n7_wiped]
+      evidence: -50
+
+  - id: rc_call
+    at: 90
+    from: Regional reliability coordinator
+    via: call
+    subject: We need your status
+    body: |
+      "We're seeing frequency swings from your area. What happened, is it
+      contained, and when do you expect to restore? Neighbouring operators are
+      asking whether they should prepare to help."
+
+  - id: crews_onsite
+    when: did.local_control and time >= at.local_control + 30
+    from: Field crew leader
+    via: team
+    subject: Crews at North-7 and North-9
+    body: |
+      Crews are at North-7 and North-9 with the substations under local control.
+      Breakers can be closed by hand when the control room gives the word.
+
+actions:
+  - id: identify_source
+    group: investigate
+    label: Find which device is sending the commands
+    takes: 10
+    result: |
+      10.40.7.25 is **N7-STN-PC**, the North-7 station computer. A new Windows
+      service started on it at 19:28 and is sending IEC-104 commands to the RTU.
+      Someone reached it over remote desktop from the corporate network earlier
+      today.
+    effects:
+      set: [source_known]
+
+  - id: isolate_station_pc
+    group: contain
+    when: source_known and not station_isolated
+    label: Disconnect N7-STN-PC from the station network but leave it powered on
+    takes: 10
+    result: N7-STN-PC is off the network. The rogue commands at North-7 stop.
+    effects:
+      set: [station_isolated]
+      spread: -20
+
+  - id: remote_close
+    group: operations
+    when: not station_isolated
+    label: Close the North-7 breakers again from SCADA straight away
+    takes: 5
+    result: The control room closes the breakers from SCADA.
+    lesson: |
+      While a rogue device is still sending commands, reclosing remotely just
+      starts a fight you lose, and every reopen stresses the grid and the
+      equipment. Cut off the source first, or put the substation under local
+      control.
+
+  - id: load_shed_plan
+    group: operations
+    label: Ask the control room to prepare a load-shedding plan and warn neighbouring operators
+    takes: 10
+    result: The control room has a staged load-shedding plan ready and neighbours are on standby. If another substation goes, it will be controlled, not automatic.
+    effects:
+      set: [shed_plan]
+      stability: 15
+
+  - id: block_104_masters
+    group: contain
+    label: Allow only the SCADA front-ends to send IEC-104 commands at every substation RTU
+    takes: 20
+    result: The RTU allowlists are live across the fleet. Commands from any other device are now rejected and logged.
+    effects:
+      set: [allowlist]
+      spread: -15
+
+  - id: image_station_pc
+    group: investigate
+    when: station_isolated
+    label: Capture memory and a disk image of N7-STN-PC
+    takes: 40
+    result: Memory and disk are captured. The memory shows a wiper scheduled to run at 21:20.
+    effects:
+      set: [n7_imaged]
+
+  - id: notify_rc
+    group: coordinate
+    label: Brief the reliability coordinator and neighbouring operators
+    takes: 15
+    result: The reliability coordinator has a clear picture and neighbours are ready to support the grid if needed.
+    effects:
+      set: [rc_informed]
+      stability: 5
+
+  - id: local_control
+    group: operations
+    label: Put the affected substations under local control and send field crews
+    takes: 15
+    result: Crews are on their way. Once they arrive, North-7 and North-9 will be operated by hand.
+    effects:
+      set: [local_control]
+
+  - id: check_relays
+    group: investigate
+    label: Check protection relay settings and firmware at the affected substations against known-good copies
+    takes: 30
+    result: All protection relays match their known-good settings. One relay at North-7 had stopped answering on the network, and a reboot by the crew brings it back.
+    effects:
+      set: [relays_checked]
+
+  - id: hunt_other_stations
+    group: investigate
+    label: Hunt for the same service on every other substation computer
+    takes: 45
+    result:
+      - when: n12_hit
+        text: The same service is on North-12's station computer, which has already acted. Nothing on the others.
+      - text: The same service is sitting dormant on the **North-12** station computer, set to start at 21:00. Nothing on the others.
+    effects:
+      set: [n12_found]
+
+  - id: isolate_n12
+    group: contain
+    when: n12_found
+    label: Disconnect the North-12 station computer
+    takes: 10
+    result: The North-12 station computer is off the network.
+    effects:
+      set: [n12_isolated]
+
+  - id: restore_supply
+    group: recover
+    when: station_isolated and (local_control or allowlist)
+    label: Restore supply step by step with the control room
+    takes: 30
+    result: Feeders come back in stages, watching frequency as each one closes. All customers are back on supply.
+    effects:
+      set: [restored]
+      supply: -40
+      stability: 10
+
+  - id: notify_authority
+    group: communicate
+    label: Report to the energy regulator and the national cyber authority
+    takes: 20
+    result: Both reports are filed. The national authority asks for the memory image and warns other grid operators.
+    effects:
+      set: [authority_told]
+
+  - id: public_update
+    group: communicate
+    label: Give the customer contact centre and the media a short, factual update
+    takes: 20
+    result: The update explains the outage, the restoration progress and that safety systems worked. Call volumes drop.
+    effects:
+      set: [public_told]
+
+  - id: close
+    group: coordinate
+    when: restored
+    label: Hand over to the day team and close the night response
+    takes: 10
+    result: You hand over to the day team.
+    effects:
+      end:
+        outcome: close
+        text: Supply is restored and the investigation moves to the day team.
+
+rules:
+  - id: rogue_active
+    when: not station_isolated
+    every: 15
+    effects:
+      spread: 5
+      stability: -5
+
+  - id: unstable
+    when: stability <= 30
+    effects:
+      end:
+        outcome: fail
+        text: Frequency falls past the limit and automatic load shedding cuts supply to over 200,000 customers. The grid operator declares an emergency.
+
+phases:
+  - id: earlier_signs
+    title: Earlier warning signs
+    at: 0
+    text: |
+      Looking back:
+
+      - Last year's assessment said the RTUs accept commands from any device
+        on the station network. The fix was budgeted for next year.
+      - Remote desktop from the corporate network to station computers was
+        allowed "temporarily" for a relay upgrade project.
+      - Two weeks ago the SOC saw a phishing email reach a protection engineer.
+        It was reported, but the account was not reviewed.
+    questions:
+      - Who accepted the risk of RTUs trusting any device, and who would have to approve the fix sooner?
+      - How do you know which remote access paths into substations are open today?
+
+  - id: containment
+    title: Containment and grid stability
+    when: station_isolated or time >= 30
+    questions:
+      - Who decides between reclosing remotely, local control and load shedding, and how quickly can they decide?
+      - What does your plan say about telling the reliability coordinator and neighbours, and when?
+      - How would you find out whether other substations are affected?
+
+  - id: restoration
+    title: Restoration and reporting
+    when: restored or time >= 3h
+    questions:
+      - What must be checked before re-energising (protection, RTU logic, station computers)?
+      - What would it take to run the grid for days with crews in the substations?
+      - Who reports to the regulator and the national authority, and what do they need from you?
+
+status:
+  - id: rogue
+    label: Rogue IEC-104 source
+    states:
+      - when: station_isolated
+        text: Cut off
+        tone: ok
+      - when: source_known
+        text: Found, still connected
+        tone: warn
+      - text: Unknown
+        tone: bad
+  - id: rtus
+    label: Substation RTUs
+    states:
+      - when: allowlist
+        text: Accept SCADA only
+        tone: ok
+      - text: Accept any device
+        tone: bad
+  - id: grid
+    label: Supply
+    states:
+      - when: restored
+        text: Restored
+        tone: ok
+      - when: n12_hit
+        text: Three substations out
+        tone: bad
+      - when: n9_hit
+        text: Two substations out
+        tone: bad
+      - text: North-7 out
+        tone: warn
+  - id: protection
+    label: Protection relays
+    states:
+      - when: relays_checked
+        text: Checked
+        tone: ok
+      - text: Unverified
+        tone: warn
+
+attack:
+  - tactic: Lateral Movement
+    technique: T0886
+    name: Remote Services
+    note: Remote desktop from the corporate network to the North-7 station computer.
+  - tactic: Execution
+    technique: T0807
+    name: Command-Line Interface
+    note: A new Windows service is installed to run the payload.
+  - tactic: Impair Process Control
+    technique: T1692.001
+    name: "Unauthorized Message: Command Message"
+    note: IEC-104 commands to open breakers, from a device that is not the SCADA front-end.
+  - tactic: Inhibit Response Function
+    technique: T0809
+    name: Data Destruction
+    note: A wiper is scheduled to erase the station computer and cover the tracks.
+  - tactic: Impact
+    technique: T0826
+    name: Loss of Availability
+    note: Customers lose supply at each substation the attacker reaches.
+
+objectives:
+  - text: Find the device sending the commands within 20 minutes
+    pass: source_known and at.identify_source <= 20
+    weight: 2
+    hit: You traced the commands to the North-7 station computer quickly.
+    miss: You took too long to find where the commands were coming from.
+
+  - text: Cut the rogue source off within 30 minutes
+    pass: station_isolated and at.isolate_station_pc <= 30
+    weight: 3
+    hit: You took the station computer off the network before it could do more.
+    miss: The rogue device kept sending commands while you worked around it.
+
+  - text: Stop it spreading to other substations
+    pass: allowlist and did.hunt_other_stations and (not n12_found or n12_isolated)
+    weight: 2
+    hit: You locked the RTUs down to the SCADA front-ends and hunted for the same implant elsewhere.
+    miss: Other substations stayed exposed. Locking RTUs to known masters and hunting for the implant both matter.
+
+  - text: Keep the grid stable while you work
+    pass: shed_plan and rc_informed
+    weight: 2
+    hit: A load-shedding plan and an informed reliability coordinator kept the grid in your hands.
+    miss: The grid's operators and neighbours were left without a plan or a picture.
+
+  - text: Don't fight the attacker from SCADA
+    pass: not did.remote_close
+    weight: 1
+    hit: You didn't try to out-click the attacker.
+    miss: Reclosing remotely while the rogue source was live only made things worse.
+
+  - text: Check protection before re-energising
+    pass: restored and at.check_relays < at.restore_supply
+    weight: 2
+    hit: You checked the protection relays before restoring supply, and found one that needed a reboot.
+    miss: Supply wasn't restored, or it was restored without checking protection first.
+
+  - text: Keep the evidence
+    pass: n7_imaged
+    weight: 1
+    hit: You captured the station computer before its wiper ran.
+    miss: The wiper erased the station computer before anyone captured it.
+
+  - text: Report and keep the public informed
+    pass: authority_told and public_told
+    weight: 1
+    hit: The authorities and customers heard from you.
+    miss: The regulator, the national authority or the public was left out.
+
+solution:
+  - identify_source
+  - isolate_station_pc
+  - load_shed_plan
+  - block_104_masters
+  - image_station_pc
+  - notify_rc
+  - local_control
+  - check_relays
+  - hunt_other_stations
+  - isolate_n12
+  - restore_supply
+  - notify_authority
+  - public_update
+  - close
+
+references:
+  - MITRE ATT&CK for ICS, Unauthorized Message (T1692)
+  - CISA and partners, advisories on attacks against electric grid control systems
+  - NIST SP 800-82r3, Guide to Operational Technology (OT) Security
