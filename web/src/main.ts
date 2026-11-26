@@ -242,6 +242,7 @@ function renderHome(): string {
         <li><strong>Read</strong> emails, alerts and calls as they arrive.</li>
         <li><strong>Decide</strong> what to do. Investigating, containing and communicating all take time.</li>
         <li><strong>See the consequences</strong>, then get a scored debrief and a report for your team.</li>
+        <li><strong>Running a session?</strong> Pick <em>Run with a team</em> for seats, votes and injects you push, and <em>Map and MSEL</em> for the facilitator script.</li>
       </ul>
     </section>
     ${cards}

@@ -135,7 +135,7 @@ describe("optional AI feedback", () => {
   it("builds a prompt from the team's own notes and decisions", () => {
     const { system, user } = feedbackPrompt(finished());
     assert.match(system, /### What went well/);
-    assert.doesNotMatch(system, /—/);
+    assert.doesNotMatch(system, /\u2014/);
     assert.match(user, /Nobody owns hist_sync/);
     assert.match(user, /Reason given: The path is open/);
     assert.match(user, /Team seats: Sara \(Incident lead\)/);

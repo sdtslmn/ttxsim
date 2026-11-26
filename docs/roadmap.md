@@ -3,16 +3,28 @@
 Ideas for what comes next, roughly in order. Suggestions and pull requests are
 welcome.
 
+## Done recently
+
+- Scenario maps, your path against the model path, and MSEL export
+  (Markdown and CSV).
+- Discussion phases, status indicators and ATT&CK for ICS attack paths in the
+  OT scenarios, and three new OT scenarios.
+- Settings to tailor a scenario to your site.
+- Team play: seats, decisions with reasons, votes, optional and custom
+  injects, presenter view.
+- Variants and chance injects with run numbers.
+- Optional AI feedback on notes and decisions, with your own API key.
+
 ## Next
 
-- **Facilitator mode.** A big-screen view for running an exercise with a team:
-  the facilitator controls the clock, the team votes on each decision, and
-  the report records who chose what.
-- **Role cards.** Optional roles (incident lead, comms, legal, OT engineer)
-  that see different messages, for exercises with several players.
-- **More scenarios.** Candidates: a DDoS during a sales peak, ransomware in a
-  hospital, a compromised software update, a building management system
-  attack in a data center.
+- **Role cards.** Each seat sees its own messages on its own device, for
+  exercises with several players in different rooms.
+- **A live clock.** Let the facilitator run the exercise in real time, with
+  injects arriving on a timer.
+- **More scenarios.** Candidates: a compromised software update to an OT
+  vendor tool, ransomware in a hospital, a building management system attack
+  in a data center, a DDoS during a sales peak.
+- **More variation** in the older scenarios.
 
 ## Later
 
