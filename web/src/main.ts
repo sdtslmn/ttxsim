@@ -14,11 +14,16 @@ import {
   reportMarkdown,
   ScenarioError,
   Sim,
+  buildFlow,
+  mselCsv,
+  mselMarkdown,
+  overlayPath,
   type Delivered,
   type LogEntry,
   type Scenario,
 } from "../../src/core/index.js";
 import { esc, md } from "./md.js";
+import { renderFlow } from "./flowview.js";
 
 const REPO = "https://github.com/sdtslmn/ttxsim";
 const app = document.getElementById("app")!;
@@ -32,7 +37,8 @@ let scenarios: Scenario[] = [];
 let custom: Scenario | undefined;
 let sim: Sim | undefined;
 let reader: Reader = { kind: "briefing" };
-let view: "home" | "play" | "debrief" = "home";
+let view: "home" | "play" | "debrief" | "map" = "home";
+let mapScenario: Scenario | undefined;
 
 // ---- progress (per browser) ---------------------------------------------------
 
@@ -103,12 +109,18 @@ function renderHome(): string {
             best === undefined
               ? ""
               : `<span class="badge ${best >= s.passMark ? "ok" : "warn"}">${best >= s.passMark ? "Passed" : "Best"} ${best}%</span>`;
-          return `<button class="card" data-start="${esc(s.id)}">
-            <span class="card-top"><span class="sector">${esc(s.sector)}</span>${badge}</span>
-            <span class="card-title">${esc(s.title)}</span>
-            <span class="card-summary">${esc(s.summary)}</span>
-            <span class="card-meta">About ${s.minutes} min · ${s.objectives.length} objectives</span>
-          </button>`;
+          return `<div class="card">
+            <button class="card-main" data-start="${esc(s.id)}">
+              <span class="card-top"><span class="sector">${esc(s.sector)}</span>${badge}</span>
+              <span class="card-title">${esc(s.title)}</span>
+              <span class="card-summary">${esc(s.summary)}</span>
+              <span class="card-meta">About ${s.minutes} min · ${s.objectives.length} objectives</span>
+            </button>
+            <div class="card-foot">
+              <button class="btn small primary" data-start="${esc(s.id)}">Play</button>
+              <button class="btn small ghost" data-map="${esc(s.id)}" title="Scenario map and MSEL for facilitators (contains spoilers)">Map and MSEL</button>
+            </div>
+          </div>`;
         })
         .join("");
       return `<section class="level"><h2>${esc(LEVEL_LABELS[level])}</h2><div class="cards">${items}</div></section>`;
@@ -145,6 +157,12 @@ function bindHome(): void {
     b.addEventListener("click", () => {
       const s = scenarios.find((x) => x.id === b.dataset.start);
       if (s) startScenario(s);
+    }),
+  );
+  app.querySelectorAll<HTMLButtonElement>("[data-map]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const s = scenarios.find((x) => x.id === b.dataset.map);
+      if (s) openMap(s);
     }),
   );
   const input = app.querySelector<HTMLInputElement>("#file");
@@ -370,6 +388,60 @@ function twoStep(button: HTMLButtonElement, prompt: string, run: () => void): vo
   }, 4000);
 }
 
+// ---- scenario map and MSEL -------------------------------------------------------
+
+function openMap(s: Scenario): void {
+  mapScenario = s;
+  history.replaceState(null, "", `#map/${s.id}`);
+  setView("map");
+}
+
+function download(name: string, text: string, type: string): void {
+  const blob = new Blob([text], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function renderMap(): string {
+  const s = mapScenario!;
+  const flow = buildFlow(s);
+  return `
+  <header class="topbar">
+    <button class="brand link" data-home><span class="logo">T</span> TTXSim</button>
+    <div class="scenario-name">${esc(s.title)}: scenario map</div>
+  </header>
+  <main class="mapview">
+    <section class="map-intro">
+      <h1>${esc(s.title)}</h1>
+      <p class="muted">${esc(s.org)}${s.sector ? ` · ${esc(s.sector)}` : ""} · ${esc(s.summary)}</p>
+      <p class="spoiler">For facilitators: this map shows the model response, the traps and what happens when steps are skipped. Players should see it after the exercise.</p>
+      <div class="debrief-actions">
+        <button class="btn primary" data-start="${esc(s.id)}">Play this scenario</button>
+        <button class="btn" data-msel-md>Download MSEL (Markdown)</button>
+        <button class="btn" data-msel-csv>Download MSEL (CSV for Excel)</button>
+        <button class="btn ghost" data-home>All scenarios</button>
+      </div>
+    </section>
+    <section class="block">${renderFlow(flow)}</section>
+  </main>`;
+}
+
+function bindMap(): void {
+  const s = mapScenario!;
+  app.querySelectorAll("[data-home]").forEach((b) =>
+    b.addEventListener("click", () => {
+      history.replaceState(null, "", "#");
+      setView("home");
+    }),
+  );
+  app.querySelector("[data-start]")?.addEventListener("click", () => startScenario(s));
+  app.querySelector("[data-msel-md]")?.addEventListener("click", () => download(`ttxsim-msel-${s.id}.md`, mselMarkdown(buildFlow(s)), "text/markdown"));
+  app.querySelector("[data-msel-csv]")?.addEventListener("click", () => download(`ttxsim-msel-${s.id}.csv`, mselCsv(buildFlow(s)), "text/csv"));
+}
+
 // ---- debrief --------------------------------------------------------------------
 
 function finish(): void {
@@ -426,12 +498,14 @@ function renderDebrief(): string {
       <button class="btn primary" data-report>Download after-action report</button>
       <button class="btn" data-retry>Try again</button>
       ${next ? `<button class="btn" data-next>Next: ${esc(next.title)}</button>` : ""}
+      <button class="btn ghost" data-map>Scenario map and MSEL</button>
       <button class="btn ghost" data-home>All scenarios</button>
     </div>
     <section class="block"><h3>Objectives</h3><ul class="objective-results">${objectives}</ul></section>
     ${lessons}
     <section class="block"><h3>Where things ended</h3><table class="table"><thead><tr><th>Measure</th><th>Start</th><th>End</th><th></th></tr></thead><tbody>${meters}</tbody></table></section>
     <section class="block"><details><summary>Timeline (${sim!.log.length} events)</summary><table class="table timeline"><tbody>${timeline}</tbody></table></details></section>
+    <section class="block"><h3>Your path against the model path</h3>${renderFlow(buildFlow(s), overlayPath(buildFlow(s), sim!))}</section>
     <section class="block hotwash"><h3>Hot wash questions for your team</h3><ul>
       <li>What did we know at each decision point, and what did we assume?</li>
       <li>Which decision would we make differently, and what would have told us sooner?</li>
@@ -452,22 +526,19 @@ function bindDebrief(): void {
     const next = scenarios[scenarios.indexOf(sim!.scenario) + 1];
     if (next) startScenario(next);
   });
-  app.querySelector("[data-report]")?.addEventListener("click", () => {
-    const blob = new Blob([reportMarkdown(sim!)], { type: "text/markdown" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `ttxsim-report-${sim!.scenario.id}.md`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  });
+  app.querySelector("[data-report]")?.addEventListener("click", () => download(`ttxsim-report-${sim!.scenario.id}.md`, reportMarkdown(sim!), "text/markdown"));
+  app.querySelector("[data-map]")?.addEventListener("click", () => openMap(sim!.scenario));
 }
 
 // ---- main -----------------------------------------------------------------------
 
 function render(): void {
-  if (view === "home" || !sim) {
+  if (view === "home" || (!sim && view !== "map")) {
     app.innerHTML = renderHome();
     bindHome();
+  } else if (view === "map" && mapScenario) {
+    app.innerHTML = renderMap();
+    bindMap();
   } else if (view === "play") {
     app.innerHTML = renderPlay();
     bindPlay();
@@ -483,6 +554,9 @@ try {
   app.innerHTML = `<pre class="error">${esc((err as Error).message)}</pre>`;
   throw err;
 }
-const fromHash = scenarios.find((s) => s.id === location.hash.slice(1));
-if (fromHash) startScenario(fromHash);
+const hash = location.hash.slice(1);
+const mapFromHash = hash.startsWith("map/") ? scenarios.find((s) => s.id === hash.slice(4)) : undefined;
+const fromHash = scenarios.find((s) => s.id === hash);
+if (mapFromHash) openMap(mapFromHash);
+else if (fromHash) startScenario(fromHash);
 else render();

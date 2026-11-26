@@ -1,35 +1,9 @@
 import type { Debrief, Sim } from "./engine.js";
+import { clockLabel, duration } from "./clock.js";
+import { buildFlow, overlayPath } from "./flow.js";
 import { GROUP_INFO, GROUPS, type Scenario } from "./types.js";
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** Wall clock inside the story, e.g. "Tue 09:42" or "Day 2 07:15". */
-export function clockLabel(s: Scenario, minute: number): string {
-  const abs = s.startMinute + minute;
-  const day = Math.floor(abs / 1440);
-  const hm = `${pad(Math.floor((abs % 1440) / 60))}:${pad(abs % 60)}`;
-  if (s.startWeekday !== undefined) return `${DAYS[(s.startWeekday + day) % 7]} ${hm}`;
-  const multiDay = s.startMinute + s.limit > 1440;
-  return multiDay ? `Day ${day + 1} ${hm}` : hm;
-}
-
-/** Time since the exercise started, e.g. "T+1:05" or "T+1d 2:10". */
-export function elapsedLabel(minute: number): string {
-  const d = Math.floor(minute / 1440);
-  const h = Math.floor((minute % 1440) / 60);
-  const m = minute % 60;
-  return d ? `T+${d}d ${h}:${pad(m)}` : `T+${h}:${pad(m)}`;
-}
-
-export function duration(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  const d = Math.floor(minutes / 1440);
-  const h = Math.floor((minutes % 1440) / 60);
-  const m = minutes % 60;
-  return [d ? `${d} d` : "", h ? `${h} h` : "", m ? `${m} min` : ""].filter(Boolean).join(" ");
-}
+export { clockLabel, duration, elapsedLabel } from "./clock.js";
 
 export function grade(d: Debrief, s: Scenario): string {
   if (d.failed) return "Not passed: the incident got away from you";
@@ -80,6 +54,24 @@ export function reportMarkdown(sim: Sim, when = new Date()): string {
   for (const g of GROUPS) byCsf.set(GROUP_INFO[g].csf, (byCsf.get(GROUP_INFO[g].csf) ?? 0) + d.groups[g]);
   for (const [csf, n] of byCsf) lines.push(`| ${csf} | ${n} |`);
   lines.push("");
+  const flow = buildFlow(s);
+  const path = overlayPath(flow, sim);
+  const keySteps = flow.steps.filter((x) => x.kind === "action");
+  if (keySteps.length) {
+    lines.push("## Your path against the model path");
+    lines.push("");
+    lines.push("Steps from the scenario's model response, and whether you took them:");
+    lines.push("");
+    for (const step of keySteps) lines.push(`- ${path.done.has(step.id) ? "[x]" : "[ ]"} ${step.title}`);
+    const happened = flow.steps.flatMap((x) => x.branches).filter((b) => path.happened.has(b.id));
+    if (happened.length) {
+      lines.push("");
+      lines.push("Things that went wrong in your run:");
+      lines.push("");
+      for (const b of happened) lines.push(`- ${b.kind === "trap" ? "You chose" : "It happened"}: ${b.title}`);
+    }
+    lines.push("");
+  }
   if (d.lessons.length) {
     lines.push("## Notes on your decisions");
     lines.push("");

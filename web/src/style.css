@@ -880,3 +880,268 @@ details summary {
     align-items: flex-start;
   }
 }
+
+/* ---- scenario cards with two buttons ---- */
+
+.card {
+  padding: 0;
+  cursor: default;
+}
+
+.card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 14px 16px 6px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.card-foot {
+  display: flex;
+  gap: 8px;
+  padding: 6px 16px 14px;
+}
+
+/* ---- scenario map ---- */
+
+.mapview {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 50px;
+}
+
+.map-intro h1 {
+  margin: 0 0 4px;
+  font-size: 24px;
+}
+
+.spoiler {
+  background: var(--warn-soft);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.flow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lg {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+
+.lg-step {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.lg-missed {
+  background: var(--warn-soft);
+  border: 1px dashed var(--warn);
+}
+
+.lg-trap {
+  background: var(--bad-soft);
+  border-color: var(--bad);
+}
+
+.lg-fail {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+
+.flow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.flow-row {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 26px;
+  align-items: start;
+}
+
+.flow-time {
+  font-size: 13px;
+  color: var(--muted);
+  padding-top: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.flow-step {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  padding: 8px 12px;
+  margin-bottom: 18px;
+}
+
+.flow-step::after {
+  content: "";
+  position: absolute;
+  left: 22px;
+  bottom: -19px;
+  height: 18px;
+  border-left: 2px solid var(--line);
+}
+
+.flow-row:last-child .flow-step::after {
+  display: none;
+}
+
+.flow-step.k-inject {
+  border-left-color: var(--muted);
+}
+
+.flow-step.k-end {
+  border-left-color: var(--text);
+}
+
+.flow-step strong {
+  display: block;
+  font-size: 14px;
+}
+
+.flow-step p,
+.branch p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.flow-tag,
+.branch-kind {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+.flow-step.missed {
+  border-style: dashed;
+  border-left-style: solid;
+  border-left-color: var(--bad);
+  opacity: 0.85;
+}
+
+.flow-step.done {
+  border-left-color: var(--ok);
+}
+
+.faded {
+  opacity: 0.45;
+}
+
+.flow-badge {
+  float: right;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 8px;
+  border-radius: 999px;
+}
+
+.flow-badge.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.flow-badge.bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.flow-branches {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.branch {
+  position: relative;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 14px;
+}
+
+.branch::before {
+  content: "";
+  position: absolute;
+  left: -27px;
+  top: 18px;
+  width: 26px;
+  border-top: 1px dashed var(--muted);
+}
+
+.branch strong {
+  display: block;
+}
+
+.b-missed {
+  background: var(--warn-soft);
+  border: 1px dashed var(--warn);
+}
+
+.b-trap {
+  background: var(--bad-soft);
+  border: 1px solid var(--bad);
+}
+
+.b-fail {
+  background: var(--bad);
+  color: #fff;
+  border: 1px solid var(--bad);
+}
+
+.b-fail p,
+.b-fail .branch-kind {
+  color: #fff;
+}
+
+.branch.happened {
+  box-shadow: 0 0 0 2px var(--bad);
+}
+
+.flow-extra {
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .flow-row {
+    grid-template-columns: 1fr;
+  }
+  .flow-time {
+    text-align: left;
+    padding-top: 0;
+  }
+  .flow-branches {
+    margin: -8px 0 18px 18px;
+  }
+  .branch::before {
+    display: none;
+  }
+}

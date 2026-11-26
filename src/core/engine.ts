@@ -180,7 +180,7 @@ export class Sim {
       for (const r of this.scenario.rules) {
         if (this.ended) break;
         if (r.every && this.time % r.every === 0 && this.test(r.when)) {
-          if (r.text) this.pending.push({ time: this.time, kind: "rule", title: r.text });
+          if (r.text) this.pending.push({ time: this.time, kind: "rule", title: r.text, ref: r.id });
           this.apply(r.effects, r.text ?? "");
         }
       }
@@ -216,7 +216,7 @@ export class Sim {
         if (this.ended) break;
         if (!r.every && !this.fired.has(r.id) && this.test(r.when)) {
           this.fired.add(r.id);
-          if (r.text) this.pending.push({ time: this.time, kind: "rule", title: r.text });
+          if (r.text) this.pending.push({ time: this.time, kind: "rule", title: r.text, ref: r.id });
           this.apply(r.effects, r.text ?? "");
           changed = true;
         }
@@ -251,7 +251,7 @@ export class Sim {
     this.ended = true;
     this.failed = outcome === "fail";
     this.endText = text;
-    this.pending.push({ time: this.time, kind: "end", title: outcome === "fail" ? "The exercise ended badly" : "The exercise has ended", text });
+    this.pending.push({ time: this.time, kind: "end", title: outcome === "fail" ? "The exercise ended badly" : "The exercise has ended", text, ref: outcome });
   }
 
   private flush(): void {

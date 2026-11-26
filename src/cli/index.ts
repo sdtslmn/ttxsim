@@ -17,6 +17,11 @@ import {
   reportMarkdown,
   ScenarioError,
   Sim,
+  buildFlow,
+  groupLabel,
+  mselCsv,
+  mselMarkdown,
+  overlayPath,
   type LogEntry,
   type Scenario,
 } from "../core/index.js";
@@ -219,7 +224,7 @@ function showDebrief(): void {
     }
   }
   say();
-  say(c.dim(`Type report to save an after-action report, play ${scenarios.indexOf(s) + 1} to try again, or next.`));
+  say(c.dim(`Type report to save an after-action report, map to see your path, play ${scenarios.indexOf(s) + 1} to try again, or next.`));
 }
 
 function writeReport(file?: string): void {
@@ -241,6 +246,34 @@ function parseWait(arg: string | undefined): number | undefined | null {
   return Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0);
 }
 
+function showMap(s: Scenario): void {
+  const flow = buildFlow(s);
+  const overlay = sim && sim.scenario === s && sim.ended ? overlayPath(flow, sim) : undefined;
+  say(rule(`Scenario map: ${s.title}`));
+  say(c.dim(overlay ? "Your path is marked: ✔ you did it, ✘ you missed it, ! it happened to you." : "Spoilers: this is the model response, with traps and the consequences of skipping steps."));
+  say();
+  for (const step of flow.steps) {
+    const kind = step.kind === "inject" ? "Message" : step.kind === "end" ? "End" : groupLabel(step.group);
+    let mark = "  ";
+    if (overlay && step.kind === "action") mark = overlay.done.has(step.id) ? c.green("✔ ") : c.red("✘ ");
+    say(`${c.dim(clockLabel(s, step.time).padEnd(10))} ${mark}${c.dim(kind.padEnd(12))} ${step.kind === "action" ? c.bold(step.title) : step.title}`);
+    for (const b of step.branches) {
+      const hit = overlay?.happened.has(b.id) ? c.red("! ") : "  ";
+      const label = b.kind === "trap" ? c.red("trap") : b.kind === "fail" ? c.red("fail") : c.yellow("if skipped");
+      say(`${" ".repeat(13)}${hit}└─ ${label}: ${b.title}`);
+    }
+  }
+  say();
+  say(c.dim(`Type msel ${scenarios.includes(s) ? scenarios.indexOf(s) + 1 : ""} to save the master scenario events list for facilitators.`));
+}
+
+function writeMsel(s: Scenario, file?: string): void {
+  const out = resolve(file ?? `ttxsim-msel-${s.id}.md`);
+  const flow = buildFlow(s);
+  writeFileSync(out, out.endsWith(".csv") ? mselCsv(flow) : mselMarkdown(flow));
+  say(`Saved ${out}`);
+}
+
 function help(): void {
   say(`${c.bold("Before an exercise")}
   scenarios              list the scenarios
@@ -260,7 +293,12 @@ ${c.bold("During an exercise")}
 
 ${c.bold("After an exercise")}
   report [file]          save a Markdown after-action report
+  map                    show the scenario map with your path marked
   next                   start the next scenario
+
+${c.bold("For facilitators")}
+  map <n|id>             show a scenario's map (spoilers)
+  msel <n|id> [file]     save the master scenario events list (.md, or .csv)
 
   help, quit`);
 }
@@ -312,6 +350,19 @@ function run(line: string): boolean {
         const s = loadFile(arg);
         if (s) start(s);
       }
+      return true;
+    }
+    case "map": {
+      const s = arg ? pickScenario(arg) : sim?.scenario;
+      if (!s) say(arg ? c.red(`No scenario "${arg}".`) : "Usage: map <n|id>");
+      else showMap(s);
+      return true;
+    }
+    case "msel": {
+      const [ref, file] = rest;
+      const s = ref ? pickScenario(ref) : sim?.scenario;
+      if (!s) say("Usage: msel <n|id> [file.md|file.csv]");
+      else writeMsel(s, file);
       return true;
     }
     case "next": {
@@ -438,6 +489,8 @@ function main(): void {
     say("       ttxsim play <file>     start your own scenario file");
     say("       ttxsim list            list scenarios");
     say("       ttxsim validate [files] check scenario files");
+    say("       ttxsim map <n|id>      show a scenario map");
+    say("       ttxsim msel <n|id> [file] save the master scenario events list");
     return;
   }
   try {
@@ -448,6 +501,16 @@ function main(): void {
   }
   if (cmd === "list") {
     listScenarios();
+    return;
+  }
+  if (cmd === "map" || cmd === "msel") {
+    const s = pickScenario(args[0] ?? "") ?? (args[0] && existsSync(args[0]) ? loadFile(args[0]) : undefined);
+    if (!s) {
+      say(c.red(`No scenario "${args[0] ?? ""}".`));
+      process.exit(1);
+    }
+    if (cmd === "map") showMap(s);
+    else writeMsel(s, args[1]);
     return;
   }
   if (cmd === "play") {

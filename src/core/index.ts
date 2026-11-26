@@ -3,6 +3,7 @@ export * from "./expr.js";
 export * from "./load.js";
 export * from "./engine.js";
 export * from "./report.js";
+export * from "./flow.js";
 
 import { SCENARIO_FILES } from "./generated/scenarios.js";
 import { loadScenario } from "./load.js";
